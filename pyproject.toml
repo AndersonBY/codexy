@@ -28,7 +28,7 @@ description = "A Python implementation of the Codex CLI tool."
 name = "codexy"
 readme = "README.md"
 requires-python = ">=3.10"
-version = "0.0.1"
+version = "0.0.2"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/andersonby/codexy/issues"
