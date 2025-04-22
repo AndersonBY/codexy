@@ -13,6 +13,8 @@
 
 ![Codexy demo GIF](./assets/codexy-demo.gif)
 
+![Codexy demo 2 GIF](./assets/codexy-demo-2.gif)
+
 ---
 
 <details>
