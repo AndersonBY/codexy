@@ -1,5 +1,9 @@
-<h1 align="center">OpenAI Codex CLI (Python Implementation)</h1>
-<p align="center">Lightweight coding agent that runs in your terminal (Python version)</p>
+<p align="center">
+  <img src="./assets/logo.svg" alt="Codexy Logo" width="200">
+</p>
+
+<h1 align="center">Codexy</h1>
+<p align="center">Lightweight coding agent that runs in your terminal (OpenAI Codex CLI Python version)</p>
 
 <p align="center">
   <a href="README_ZH.md">中文文档</a> | <b>English</b>

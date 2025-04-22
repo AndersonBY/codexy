@@ -1,5 +1,9 @@
-<h1 align="center">OpenAI Codex CLI (Python 实现)</h1>
-<p align="center">一个在终端中运行的轻量级编码助手（Python 版本）</p>
+<p align="center">
+  <img src="./assets/logo.svg" alt="Codexy Logo" width="200">
+</p>
+
+<h1 align="center">Codexy</h1>
+<p align="center">一个在终端中运行的轻量级编码助手（OpenAI Codex CLI Python 版本）</p>
 
 <p align="center">
   <b>中文</b> | <a href="README.md">English</a>
