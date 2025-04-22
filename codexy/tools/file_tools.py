@@ -1,4 +1,3 @@
-import os
 import fnmatch
 from pathlib import Path
 from typing import Optional, List
@@ -105,9 +104,24 @@ def write_to_file_tool(path: str, content: str, line_count: int) -> str:
         return f"Error writing to file '{path}': {e}"
 
 
-def _should_ignore_path(path: str, ignore_patterns: List[str]) -> bool:
-    """Check if the path should be ignored"""
+def _should_ignore_path(path: str, ignore_patterns: List[str], current_dir: Optional[Path] = None) -> bool:
+    """Check if the path should be ignored
+
+    Args:
+        path: The path to check (relative to the project root)
+        ignore_patterns: The list of ignore patterns
+        current_dir: The current directory being processed (for subdirectory .gitignore matching)
+    """
     path = path.replace("\\", "/")  # Normalize to forward slashes
+
+    if current_dir is not None:
+        rel_to_current = None
+        try:
+            full_path = PROJECT_ROOT / path
+            if full_path.exists() and str(full_path).startswith(str(current_dir)):
+                rel_to_current = str(full_path.relative_to(current_dir)).replace("\\", "/")
+        except Exception:
+            pass
 
     # Check if each part of the path should be ignored
     path_parts = Path(path).parts
@@ -131,32 +145,156 @@ def _should_ignore_path(path: str, ignore_patterns: List[str]) -> bool:
             if fnmatch.fnmatch(path_parts[i], pattern):
                 return True
 
+            # Check if the last part of the path matches (handles ignores in subdirectories)
+            if i == len(path_parts) - 1:
+                last_part = path_parts[i]
+                if fnmatch.fnmatch(last_part, pattern):
+                    return True
+
             # Check directory path match (ensure directory patterns match correctly)
             if pattern.endswith("/"):
                 if fnmatch.fnmatch(current_path + "/", pattern):
                     return True
 
+                if i == len(path_parts) - 1 and fnmatch.fnmatch(path_parts[i] + "/", pattern):
+                    return True
+
+            # If there is a relative path, check if it matches
+            if current_dir is not None and rel_to_current is not None:
+                if pattern.endswith("/") and isinstance(rel_to_current, str):
+                    if fnmatch.fnmatch(rel_to_current + "/", pattern):
+                        return True
+                if isinstance(rel_to_current, str) and fnmatch.fnmatch(rel_to_current, pattern):
+                    return True
+
     return False
 
 
-def get_gitignore_patterns() -> List[str]:
-    """Get patterns from .gitignore file in the project root."""
+def collect_gitignore_patterns(directory_path: Path) -> List[str]:
+    """Collect .gitignore rules from the specified directory and all its parent directories."""
     patterns: List[str] = []
-    gitignore_path = PROJECT_ROOT / ".gitignore"
 
-    if gitignore_path.exists():
-        try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
-        except Exception as e:
-            print(f"Warning: Failed to read .gitignore file: {e}")
+    # Start from the current directory and collect all parent directory's .gitignore rules
+    current_dir = directory_path
+    while str(current_dir).startswith(str(PROJECT_ROOT)):
+        gitignore_path = current_dir / ".gitignore"
+
+        if gitignore_path.exists():
+            try:
+                with open(gitignore_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    dir_patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+                    patterns.extend(dir_patterns)
+            except Exception as e:
+                print(f"Warning: Failed to read .gitignore file: {e}")
+
+        # If we've reached the project root, stop
+        if current_dir == PROJECT_ROOT:
+            break
+
+        # Move to the parent directory
+        current_dir = current_dir.parent
+
+    # Add some common directories that should be ignored
+    common_ignores = [".git/", "node_modules/", "dist/", "__pycache__/", "*.pyc", "*.pyo", "build/", "venv/", ".env"]
+
+    for pattern in common_ignores:
+        if pattern not in patterns:
+            patterns.append(pattern)
 
     return patterns
 
 
+def _recursive_list_files(
+    current_path: Path, root_path: Path, parent_ignore_patterns: List[str], use_gitignore: bool, entries: List[str]
+) -> None:
+    """Recursively traverse directories, checking if they should be ignored before processing."""
+
+    # Check if this directory itself should be ignored (using parent directory's ignore rules)
+    rel_path = current_path.relative_to(PROJECT_ROOT)
+    rel_path_str = str(rel_path).replace("\\", "/")
+
+    # If this is the project root, don't check if it should be ignored
+    if current_path != PROJECT_ROOT and use_gitignore:
+        if _should_ignore_path(rel_path_str, parent_ignore_patterns):
+            return  # If the directory should be ignored, return without processing further
+
+    # Check if the current directory has its own .gitignore file, merge it into the parent rules
+    current_ignore_patterns = parent_ignore_patterns.copy()
+    local_patterns = []
+    if use_gitignore:
+        gitignore_path = current_path / ".gitignore"
+        if gitignore_path.exists():
+            try:
+                with open(gitignore_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    local_patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+                    current_ignore_patterns.extend(local_patterns)
+            except Exception as e:
+                print(f"Error reading local .gitignore file: {e}")
+
+    try:
+        # Get all directories and files
+        dirs = []
+        files = []
+
+        for entry in current_path.iterdir():
+            if entry.is_dir():
+                dirs.append(entry)
+            else:
+                files.append(entry)
+
+        # Process files
+        for file_path in files:
+            # Skip .gitignore files
+            if file_path.name == ".gitignore" and use_gitignore:
+                continue
+
+            rel_file_path = file_path.relative_to(PROJECT_ROOT)
+            rel_file_path_str = str(rel_file_path).replace("\\", "/")
+
+            # Check if the file should be ignored (using merged rules)
+            if use_gitignore:
+                # Pass current directory for local rules
+                if _should_ignore_path(
+                    rel_file_path_str, current_ignore_patterns, current_path if local_patterns else None
+                ):
+                    continue
+
+            # Add file to results
+            entries.append("[F] " + rel_file_path_str)
+
+        # Process directories
+        for dir_path in dirs:
+            # Skip .git directory
+            if dir_path.name == ".git":
+                continue
+
+            rel_dir_path = dir_path.relative_to(PROJECT_ROOT)
+            rel_dir_path_str = str(rel_dir_path).replace("\\", "/")
+
+            # Check if the directory should be ignored (using merged rules)
+            should_ignore = False
+            if use_gitignore:
+                # Pass current directory for local rules
+                if _should_ignore_path(
+                    rel_dir_path_str, current_ignore_patterns, current_path if local_patterns else None
+                ):
+                    should_ignore = True
+
+            # If the directory should not be ignored, add it to results and recursively process
+            if not should_ignore:
+                entries.append("[D] " + rel_dir_path_str)
+                # Recursively process subdirectories (pass current merged ignore rules)
+                _recursive_list_files(dir_path, root_path, current_ignore_patterns, use_gitignore, entries)
+
+    except Exception as e:
+        print(f"Error traversing directory {current_path}: {e}")
+
+
 def list_files_tool(path: str, recursive: bool = False, use_gitignore: bool = True) -> str:
     """Lists files and directories within the specified path."""
+
     if not path:
         # Default to listing the project root if path is empty or '.'
         target_path = PROJECT_ROOT
@@ -172,81 +310,34 @@ def list_files_tool(path: str, recursive: bool = False, use_gitignore: bool = Tr
     if not target_path.is_dir():
         return f"Error: Path '{display_path}' is not a valid directory."
 
-    # Get gitignore patterns if needed
+    # Get gitignore patterns if needed - 使用新的父目录收集函数
     ignore_patterns: List[str] = []
     if use_gitignore:
-        ignore_patterns = get_gitignore_patterns()
-        # 确保.git/也在忽略列表中
-        if ".git/" not in ignore_patterns and ".git" not in ignore_patterns:
-            ignore_patterns.append(".git/")
+        ignore_patterns = collect_gitignore_patterns(target_path)
 
     try:
         entries = []
+
         if recursive:
-            # Use os.walk for potentially better performance and handling of symlink loops etc.
-            for root, dirs, files in os.walk(target_path):
-                current_root = Path(root)
-
-                # 优先过滤掉.git目录，避免遍历内部
-                if ".git" in dirs:
-                    dirs.remove(".git")
-
-                # Filter directories to avoid traversing ignored directories
-                if use_gitignore and ignore_patterns:
-                    dirs_to_remove = []
-                    for dir_name in dirs:
-                        dir_path = current_root / dir_name
-                        rel_path = dir_path.relative_to(PROJECT_ROOT)
-                        rel_path_str = str(rel_path).replace("\\", "/")
-
-                        if _should_ignore_path(rel_path_str, ignore_patterns):
-                            dirs_to_remove.append(dir_name)
-
-                    # Remove ignored directories from dirs list to prevent traversal
-                    for dir_name in dirs_to_remove:
-                        dirs.remove(dir_name)
-
-                # Add directories
-                for name in dirs:
-                    entry_path = current_root / name
-                    relative_path = entry_path.relative_to(PROJECT_ROOT)
-                    rel_path_str = str(relative_path).replace("\\", "/")
-
-                    # 确保.git目录不被添加到结果中
-                    if (
-                        not rel_path_str.startswith(".git/")
-                        and rel_path_str != ".git"
-                        and (not use_gitignore or not _should_ignore_path(rel_path_str, ignore_patterns))
-                    ):
-                        entries.append("[D] " + rel_path_str)
-
-                # Add files
-                for name in files:
-                    entry_path = current_root / name
-                    relative_path = entry_path.relative_to(PROJECT_ROOT)
-                    rel_path_str = str(relative_path).replace("\\", "/")
-
-                    # 确保.git目录内的文件不被添加到结果中
-                    if not rel_path_str.startswith(".git/") and (
-                        not use_gitignore or not _should_ignore_path(rel_path_str, ignore_patterns)
-                    ):
-                        entries.append("[F] " + rel_path_str)
+            # Use recursive traversal
+            _recursive_list_files(target_path, PROJECT_ROOT, ignore_patterns, use_gitignore, entries)
         else:
-            for entry in target_path.iterdir():  # iterdir for non-recursive
+            # Non-recursive mode - list files and directories in current directory
+            for entry in target_path.iterdir():
                 relative_path = entry.relative_to(PROJECT_ROOT)
                 rel_path_str = str(relative_path).replace("\\", "/")
 
-                # 确保.git目录和其内容不被添加到结果中
-                if (
-                    rel_path_str != ".git"
-                    and not rel_path_str.startswith(".git/")
-                    and (not use_gitignore or not _should_ignore_path(rel_path_str, ignore_patterns))
-                ):
+                # Check if it should be ignored
+                if use_gitignore and _should_ignore_path(rel_path_str, ignore_patterns):
+                    continue
+
+                # Add paths that should not be ignored
+                if rel_path_str != ".git" and not rel_path_str.startswith(".git/"):
                     prefix = "[D] " if entry.is_dir() else "[F] "
                     entries.append(prefix + rel_path_str)  # Normalize slashes
 
         if not entries:
-            return f"Directory '{display_path}' is empty."
+            return f"Directory '{display_path}' is empty or all entries are ignored."
 
         # Sort entries for consistent output
         entries.sort()
@@ -304,7 +395,7 @@ WRITE_TO_FILE_TOOL_DEF: ChatCompletionToolParam = {
                     "type": "string",
                     "description": "The complete content to write to the file.",
                 },
-                "line_count": {  # Add line_count as in the original tool spec
+                "line_count": {
                     "type": "integer",
                     "description": "The total number of lines in the provided content.",
                 },
