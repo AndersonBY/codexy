@@ -1,0 +1,47 @@
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[project]
+authors = [{ name = "AndersonBY", email = "anderson@163.com" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Code Generators",
+]
+dependencies = [
+  "click>=8.0",
+  "PyYAML>=6.0",
+  "openai>=1.0",
+  "rich>=13.0",
+  "detect-secrets>=1.5.0",
+  "textual",
+  "httpx>=0.28.1",
+  "packaging>=25.0",
+  "python-dotenv",
+]
+description = "A Python implementation of the Codex CLI tool."
+name = "codexy"
+readme = "README.md"
+requires-python = ">=3.10"
+version = "0.0.1"
+
+[project.urls]
+"Bug Tracker" = "https://github.com/andersonby/codexy/issues"
+"Homepage" = "https://github.com/andersonby/codexy"
+
+[project.scripts]
+codexy = "codexy.cli.main:codexy"
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+excludes = ["tests"]
+
+[dependency-groups]
+dev = ["textual-dev", "pytest>=8.3.5"]
