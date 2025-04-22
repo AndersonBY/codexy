@@ -154,8 +154,6 @@ class ModelOverlay(Static):
 
         if highlighted_index is not None and len(list_view) > 0:
             list_view.index = highlighted_index
-            # Ensure the highlighted item is visible
-            self.call_later(lambda lv=list_view, idx=highlighted_index: lv.scroll_to_index(idx, animate=False))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle selection from the list view."""
