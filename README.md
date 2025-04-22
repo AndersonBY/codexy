@@ -1,6 +1,10 @@
 <h1 align="center">OpenAI Codex CLI (Python Implementation)</h1>
 <p align="center">Lightweight coding agent that runs in your terminal (Python version)</p>
 
+<p align="center">
+  <a href="README_ZH.md">中文文档</a> | <b>English</b>
+</p>
+
 <p align="center"><code>pip install -U codexy</code></p>
 
 ![Codexy demo GIF](./assets/codexy-demo.gif)
@@ -8,17 +12,17 @@
 ---
 
 <details>
-<summary><strong>Table of Contents</strong></summary>
+<summary><strong>Table of Contents</strong></summary>
 
 - [Original TypeScript Version](#original-typescript-version)
 - [Experimental Technology Disclaimer](#experimental-technology-disclaimer)
 - [Quickstart](#quickstart)
-- [Why Codexy?](#why-codexy)
-- [Security Model \& Permissions](#securitymodelpermissions)
-- [System Requirements](#systemrequirements)
-- [CLI Reference](#clireference)
+- [Why Codexy?](#why-codexy)
+- [Security Model & Permissions](#securitymodelpermissions)
+- [System Requirements](#systemrequirements)
+- [CLI Reference](#clireference)
 - [Configuration](#configuration)
-- [Project Docs](#projectdocs)
+- [Project Docs](#projectdocs)
 - [Contributing](#contributing)
 - [License](#license)
 - [Zero Data Retention (ZDR) Organization Limitation](#zero-data-retention-zdr-organization-limitation)
@@ -37,7 +41,7 @@ This Python version aims to provide similar functionality using Python tools and
 
 ## Experimental Technology Disclaimer
 
-Codexy (the Python implementation of Codex CLI) is an experimental project under active development. It is not yet stable, may contain bugs, incomplete features, or undergo breaking changes. We’re building it in the open with the community and welcome:
+Codexy (the Python implementation of Codex CLI) is an experimental project under active development. It is not yet stable, may contain bugs, incomplete features, or undergo breaking changes. We're building it in the open with the community and welcome:
 
 - Bug reports
 - Feature requests
@@ -87,7 +91,7 @@ codexy "explain this codebase to me"
 codexy --approval-mode full-auto "create the fanciest todo-list app"
 ```
 
-That’s it – Codexy will interact with the OpenAI API, suggest file changes or commands, and (depending on your approval mode) execute them.
+That's it – Codexy will interact with the OpenAI API, suggest file changes or commands, and (depending on your approval mode) execute them.
 
 ---
 

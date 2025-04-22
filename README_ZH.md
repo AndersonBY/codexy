@@ -1,6 +1,10 @@
 <h1 align="center">OpenAI Codex CLI (Python 实现)</h1>
 <p align="center">一个在终端中运行的轻量级编码助手（Python 版本）</p>
 
+<p align="center">
+  <b>中文</b> | <a href="README.md">English</a>
+</p>
+
 <p align="center"><code>pip install -U codexy</code></p>
 
 ![Codexy demo GIF](./assets/codexy-demo.gif)
