@@ -37,6 +37,9 @@ def read_file_tool(path: str, start_line: Optional[int] = None, end_line: Option
                 start_idx = (start_line - 1) if start_line is not None and start_line > 0 else 0
                 end_idx = end_line if end_line is not None and end_line <= len(lines) else len(lines)
 
+                if start_line and start_line > len(lines):
+                    return f"Error: start_line ({start_line}) is greater than the number of lines in the file ({len(lines)})."
+
                 # Ensure start_idx is not greater than end_idx
                 if start_idx >= end_idx:
                     return f"Error: start_line ({start_line}) must be less than end_line ({end_line})."
