@@ -20,6 +20,7 @@ from openai import (
     APIError,
     BadRequestError,
 )
+from openai._types import NOT_GIVEN
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
@@ -243,7 +244,7 @@ class Agent:
             yield create_stream_event(type="cancelled", content="Cancelled before API call.")
             return
 
-        service_tier = "auto"
+        service_tier = NOT_GIVEN
         if self.config.get("flex_mode", False):
             # Ensure the model supports flex mode (optional check)
             allowed_flex_models = {"o3", "o4-mini"}
