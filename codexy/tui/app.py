@@ -26,6 +26,8 @@ from ..utils.storage import (
 from ..utils.filesystem import check_in_git
 from ..utils.update_checker import check_for_updates, UpdateInfo
 from ..utils.model_utils import get_available_models
+from ..utils.model_info import get_max_tokens_for_model
+from ..utils.token_utils import approximate_tokens_used
 from .widgets.chat.history_view import ChatHistoryView
 from .widgets.chat.input_area import ChatInputArea
 from .widgets.chat.command_review import CommandReviewWidget
@@ -181,6 +183,7 @@ class CodexTuiApp(App[None]):
     _fetching_models: bool = False
     available_models: reactive[List[str]] = reactive(list)
     thinking_seconds: reactive[int] = reactive(0)
+    token_usage_percent: reactive[float] = reactive(100.0)
 
     # --- State ---
     agent: Optional[Agent] = None
@@ -193,6 +196,7 @@ class CodexTuiApp(App[None]):
     initial_prompt: Optional[str] = None
     initial_images: Optional[List[str]] = None
     _thinking_timer: Optional[Timer] = None
+    _processing_stream: bool = False
 
     # --- Initialization & Setup ---
     def __init__(
@@ -220,6 +224,28 @@ class CodexTuiApp(App[None]):
             self.history_config = DEFAULT_HISTORY_CONFIG
             self.log.error("Critical: App config failed to load during initialization.")
 
+    def _update_token_usage(self) -> None:
+        """Calculates and updates the token usage percentage."""
+        if not self.agent or not self.current_model:
+            self.token_usage_percent = 100.0
+            return
+
+        try:
+            max_tokens = get_max_tokens_for_model(self.current_model)
+            if max_tokens <= 0:
+                self.token_usage_percent = 0.0  # Avoid division by zero
+                return
+
+            used_tokens = approximate_tokens_used(self.agent.history)
+            remaining = max(0, max_tokens - used_tokens)
+            self.token_usage_percent = (remaining / max_tokens) * 100.0
+            self.log.info(
+                f"Token usage updated: {used_tokens}/{max_tokens} tokens used ({self.token_usage_percent:.1f}% remaining)"
+            )
+        except Exception as e:
+            self.log.error(f"Error calculating token usage: {e}")
+            self.token_usage_percent = 100.0
+
     async def on_mount(self) -> None:
         """Called when the application is mounted."""
         self.log.info("Codex TUI App Mounted")
@@ -230,7 +256,11 @@ class CodexTuiApp(App[None]):
 
         self.agent = Agent(self.app_config)
         if self.agent:
-            self.agent.session_id = self.app_config.get("sessionId", None)
+            # Generate a session ID if one doesn't exist (e.g., from config)
+            self.agent.session_id = self.app_config.get("sessionId")  # or generate_session_id() # Requires a helper
+            # If session ID generation is needed, you'd define a function like:
+            # import uuid
+            # def generate_session_id(): return str(uuid.uuid4())
 
         self.current_model = self.agent.config["model"]
 
@@ -270,6 +300,9 @@ class CodexTuiApp(App[None]):
             self.call_later(self.process_input, self.initial_prompt, self.initial_images)
             self.initial_prompt = None
             self.initial_images = []
+        else:
+            # Update token usage on mount if no initial prompt
+            self._update_token_usage()
 
         if not self.is_loading:
             self.call_later(self.query_one(ChatInputArea).focus_input)
@@ -328,7 +361,7 @@ class CodexTuiApp(App[None]):
         yield HelpOverlay(id="help-overlay")
         yield ModelOverlay(id="model-overlay")
         yield ApprovalModeOverlay(id="approval-overlay")
-        yield ChatInputArea(id="chat-input")
+        yield ChatInputArea(id="chat-input").data_bind(token_usage_percent=CodexTuiApp.token_usage_percent)
         yield Footer()
 
     # --- Helper to check if any overlay is active ---
@@ -603,6 +636,40 @@ class CodexTuiApp(App[None]):
         """Toggle the history overlay."""
         self.show_history_overlay = not self.show_history_overlay
 
+    def action_maybe_cancel_or_close(self) -> None:
+        """Handle Escape key press."""
+        self.log.info(
+            f"Escape pressed. is_loading={self.is_loading}, _processing_stream={self._processing_stream}, any_overlay_active={self._is_any_overlay_active()}"
+        )
+        if self._is_any_overlay_active():
+            self.log.info("Closing active overlay.")
+            # Close any active overlay first
+            if self.show_command_review:
+                self.query_one(CommandReviewWidget).handle_decision("no_stop")  # Simulate 'no_stop'
+            elif self.show_history_overlay:
+                self.show_history_overlay = False
+            elif self.show_help_overlay:
+                self.show_help_overlay = False
+            elif self.show_model_overlay:
+                self.show_model_overlay = False
+            elif self.show_approval_overlay:
+                self.show_approval_overlay = False
+        elif self.is_loading or self._processing_stream:
+            # Cancel agent if it's working
+            self.log.info("Cancelling agent operation.")
+            if self.agent:
+                self.agent.cancel()
+            self.is_loading = False  # Force stop loading indicator
+            self._processing_stream = False  # Reset flag
+            # Optionally add a system message about cancellation
+            self.query_one(ChatHistoryView).add_message(SystemMessageDisplay("Operation cancelled.", style="yellow"))
+            # Refocus input
+            self.call_later(self.query_one(ChatInputArea).focus_input)
+        else:
+            # If nothing else is active, exit the app (or show quit dialog if preferred)
+            self.log.info("Exiting application.")
+            self.exit()
+
     async def on_chat_input_area_submit(self, message: ChatInputArea.Submit) -> None:
         """Handle submit events from the input area."""
         # Don't process if an overlay is active
@@ -637,6 +704,7 @@ class CodexTuiApp(App[None]):
             self.pending_tool_calls = None
             self.tool_call_results = []
             self.current_tool_call_index = 0
+            self._update_token_usage()
             input_area.clear_input()
             return
         if command == "/clearhistory":
@@ -683,12 +751,15 @@ class CodexTuiApp(App[None]):
         input_area.clear_input()  # Clear input *after* adding to history
 
         self.is_loading = True
+        self._processing_stream = True  # Set flag
         self.pending_tool_calls = None
         self.tool_call_results = []
         self.current_tool_call_index = 0
         self.run_worker(
             self.handle_agent_stream(prompt=user_input, image_paths=image_paths), exclusive=True, group="agent_main"
         )
+        # Update token usage *after* adding user message to history
+        self._update_token_usage()
 
     async def handle_agent_stream(
         self,
@@ -699,11 +770,13 @@ class CodexTuiApp(App[None]):
         """Handle the agent's stream in a background worker."""
         if not self.agent:
             self.is_loading = False
+            self._processing_stream = False  # Reset flag
             return
 
         self.log.info(
             f"--- Starting handle_agent_stream (prompt={'yes' if prompt else 'no'}, tool_results={'yes' if tool_results else 'no'}) ---"
         )
+        self._processing_stream = True  # Mark as processing
 
         history_view = self.query_one(ChatHistoryView)
         current_assistant_message: Optional[AssistantMessageDisplay] = None
@@ -719,6 +792,7 @@ class CodexTuiApp(App[None]):
             else:
                 self.log.error("Agent stream handling called without prompt or tool results.")
                 self.is_loading = False
+                self._processing_stream = False  # Reset flag
                 self.call_later(
                     history_view.add_message,
                     SystemMessageDisplay("Internal error: Agent processing failed.", style="bold red"),
@@ -757,6 +831,7 @@ class CodexTuiApp(App[None]):
                         current_assistant_message.finalize_text()
                     self.log.info("[Agent] Received response_end event from stream iterator.")
                     self.call_later(history_view.scroll_end, animate=False)
+                    self._update_token_usage()
                     break
                 elif event["type"] == "error":
                     self.call_later(
@@ -790,6 +865,12 @@ class CodexTuiApp(App[None]):
             self.log.error(f"Error handling agent stream: {e}", exc_info=True)
             self.call_later(history_view.add_message, SystemMessageDisplay(f"Critical Error: {e}", style="bold red"))
             self.is_loading = False
+        finally:
+            self._processing_stream = False  # Reset flag when done or error
+            self.log.info("--- Finished handle_agent_stream ---")
+            # Ensure loading is false if stream processing ends, except when tool calls are pending
+            if not self.pending_tool_calls:
+                self.is_loading = False
 
     def process_next_tool_call(self):
         """Process the next tool call in the pending list."""
@@ -1070,6 +1151,7 @@ class CodexTuiApp(App[None]):
             history_view = self.query_one(ChatHistoryView)
             history_view.add_message(SystemMessageDisplay(f"Switched model to {selected_model}", style="italic blue"))
             self.notify(f"Model switched to {selected_model}")
+            self._update_token_usage()
         else:
             self.log.info("Selected model is the same as current, no change.")
 

@@ -1,13 +1,14 @@
 from typing import List, Optional, cast
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.message import Message
-from textual.reactive import reactive
-from textual.widgets import TextArea, Static
-from textual.binding import Binding
+from rich.text import Text
 from textual import events
 from textual.timer import Timer
+from textual.binding import Binding
+from textual.message import Message
+from textual.reactive import reactive
+from textual.app import ComposeResult
+from textual.widgets import TextArea, Static
+from textual.containers import Container, Horizontal
 
 from .thinking_indicator import ThinkingIndicator
 from ....utils.storage import HistoryEntry
@@ -23,6 +24,7 @@ class ChatInputArea(Container):
         border-top: thick $accent;
         padding: 0;
         background: $panel;
+        margin-bottom: 1;
     }
     ChatInputArea > TextArea {
         height: auto;
@@ -40,17 +42,36 @@ class ChatInputArea(Container):
         border: none;
         padding: 1;
         color: $text-muted;
-        height: 3;
+        height: 3; /* Match help bar height */
         background: $surface;
     }
-    ChatInputArea > .input-help {
+    /* Style the container for help text and tokens */
+    ChatInputArea > #input-help-container {
         height: 1;
-        color: $text-muted;
-        padding: 0 1;
+        background: $surface;
+        padding: 0 1; /* Add padding */
         width: 1fr;
+        /* We don't need layout: horizontal here, Container default is vertical, */
+        /* but the items inside will determine layout */
+    }
+    ChatInputArea > #input-help-container Horizontal { /* Style the inner Horizontal */
+        align: left middle; /* Vertically align items */
+        height: 1;
+    }
+    ChatInputArea > #input-help-container #input-help-text { /* Style the help text Static */
+        width: 1fr; /* Allow it to take up remaining space */
+        color: $text-muted;
         text-overflow: ellipsis;
         overflow: hidden;
-        background: $surface;
+        height: 1;
+    }
+    ChatInputArea > #input-help-container #input-help-tokens { /* Style the token count Static */
+        width: auto; /* Take only needed space */
+        color: $accent; /* Use accent color for visibility */
+        text-style: bold;
+        margin-left: 1; /* Space between help and tokens */
+        height: 1;
+        text-align: right; /* Align token count to the right */
     }
     """
 
@@ -62,6 +83,7 @@ class ChatInputArea(Container):
     # --- Reactives ---
     is_loading: reactive[bool] = reactive(False)
     thinking_seconds: reactive[int] = reactive(0)
+    token_usage_percent: reactive[float] = reactive(100.0)
 
     # --- State ---
     _command_history: List[HistoryEntry] = []
@@ -81,15 +103,21 @@ class ChatInputArea(Container):
     def compose(self) -> ComposeResult:
         yield TextArea(language=None, theme="css", soft_wrap=True, show_line_numbers=False, id="input-textarea")
         yield ThinkingIndicator(id="thinking")
-        yield Static("\[Ctrl+J] Submit | \[Up/Down] History | \[ESC] Cancel", classes="input-help")
+        # -- Updated help section --
+        with Container(id="input-help-container"):
+            with Horizontal():
+                yield Static(
+                    "\[Ctrl+J] Submit | \[Up/Down] History | \[ESC] Cancel/Close",
+                    classes="input-help-text",  # Use class for easier targeting
+                    id="input-help-text",
+                )
+                yield Static("", id="input-help-tokens")  # Placeholder for token count
 
     def on_mount(self) -> None:
         """Set initial state and focus when mounted."""
-        self.query_one("#thinking").display = False
-        self.query_one(".input-help").display = True
-        # Ensure TextArea exists后再聚焦
+        # Ensure TextArea exists before focusing
         try:
-            self.query_one("#input-textarea").focus()
+            self.query_one("#input-textarea", TextArea).focus()
         except Exception as e:
             self.log.warning(f"Could not focus input textarea on mount: {e}")
 
@@ -98,6 +126,26 @@ class ChatInputArea(Container):
         if self._thinking_timer:
             self._thinking_timer.stop()
             self._thinking_timer = None
+
+    def watch_token_usage_percent(self, new_value: float) -> None:
+        """Update the token usage display."""
+        try:
+            token_widget = self.query_one("#input-help-tokens", Static)
+            if token_widget.is_mounted:
+                percent_str = f"{new_value:.0f}%"
+                # Add color coding based on percentage
+                style = ""
+                if new_value < 10:
+                    style = "bold red"
+                elif new_value < 25:
+                    style = "bold yellow"
+                elif new_value < 50:
+                    style = "yellow"
+                # Update with Rich Text for styling
+                token_widget.update(Text(f"Ctx: {percent_str}", style=style))
+        except Exception as e:
+            if self.is_mounted:
+                self.log.error(f"Error updating token usage display: {e}")
 
     # --- Public API ---
     def set_loading(self, loading: bool):
@@ -133,9 +181,9 @@ class ChatInputArea(Container):
     def focus_input(self):
         """Focus on input field."""
         try:
-            if self.is_mounted:  # Check if parent component is mounted
-                textarea = self.query_one("#input-textarea")
-                if textarea.is_mounted:  # Check if child component is mounted
+            if self.is_mounted:
+                textarea = self.query_one("#input-textarea", TextArea)
+                if textarea.is_mounted:
                     textarea.focus()
         except Exception:
             pass
@@ -152,11 +200,11 @@ class ChatInputArea(Container):
         try:
             thinking_indicator = cast(ThinkingIndicator, self.query_one("#thinking"))
             textarea = cast(TextArea, self.query_one("#input-textarea"))
-            help_text = self.query_one(".input-help")
+            help_container = self.query_one("#input-help-container")
 
             thinking_indicator.display = loading
             textarea.display = not loading
-            help_text.display = not loading
+            help_container.display = not loading
 
             if loading:
                 self.thinking_seconds = 0
@@ -180,7 +228,6 @@ class ChatInputArea(Container):
         if self.is_loading:
             self.thinking_seconds += 1
             try:
-                # Check if component exists
                 thinking_indicator = cast(ThinkingIndicator, self.query_one("#thinking"))
                 if thinking_indicator.is_mounted:
                     thinking_indicator.set_thinking_seconds(self.thinking_seconds)
@@ -189,6 +236,10 @@ class ChatInputArea(Container):
                 if self._thinking_timer:
                     self._thinking_timer.stop()
                     self._thinking_timer = None
+        else:
+            if self._thinking_timer:
+                self._thinking_timer.stop()
+                self._thinking_timer = None
 
     # --- Actions and Event Handlers ---
     def action_submit(self):
