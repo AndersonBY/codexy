@@ -21,9 +21,8 @@ from openai import (
     BadRequestError,
 )
 from openai.types.chat import (
-    ChatCompletionMessageToolCall,
     ChatCompletionMessageParam,
-    ChatCompletionSystemMessageParam,
+    ChatCompletionMessageToolCall,
     ChatCompletionUserMessageParam,
     ChatCompletionToolMessageParam,
 )
@@ -71,8 +70,16 @@ class Agent:
 
     def __init__(self, config: AppConfig):
         self.config = config
+        # Ensure API key is fetched correctly, considering potential None
+        api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            # Handle missing API key scenario, perhaps raise an error or log warning
+            print("Warning: OpenAI API key is not configured.", file=sys.stderr)
+            # Depending on desired behavior, you might raise an exception here
+            # raise ValueError("OpenAI API key is required.")
+
         self.async_client = AsyncOpenAI(
-            api_key=config.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+            api_key=api_key,  # Pass the resolved API key
             base_url=config.get("base_url") or os.environ.get("OPENAI_BASE_URL"),
             timeout=config.get("timeout") or float(os.environ.get("OPENAI_TIMEOUT_MS", 60000)) / 1000.0,
             max_retries=0,  # Disable automatic retries in the client, we handle it manually
@@ -98,12 +105,14 @@ class Agent:
         print("[Agent] In-memory conversation history cleared.", file=sys.stderr)
 
     def _prepare_messages(self) -> List[ChatCompletionMessageParam]:
-        """Prepares the message history for the API call, converting TypedDicts."""
-        system_message: ChatCompletionSystemMessageParam = {
-            "role": "system",
-            "content": self.config.get("instructions", ""),
-        }
-        api_messages: List[ChatCompletionMessageParam] = [system_message]
+        """Prepares the message history for the API call, including system prompt."""
+        api_messages: List[ChatCompletionMessageParam] = []
+        system_prompt = self.config.get("instructions")
+        if system_prompt:
+            # Ensure only one system message at the beginning
+            api_messages.append({"role": "system", "content": system_prompt})
+
+        # Add history, filtering out any previous system messages if necessary
         for msg in self.history:
             if isinstance(msg, dict) and "role" in msg:
                 api_messages.append(msg)
@@ -146,14 +155,24 @@ class Agent:
         function_name = tool_call.function.name
         try:
             if not isinstance(tool_call.function.arguments, str):
-                return f"Error: Invalid argument type for tool {function_name}. Expected string, got {type(tool_call.function.arguments).__name__}"
-            arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                # Attempt to convert if it's a dict (might happen due to internal state issues)
+                if isinstance(tool_call.function.arguments, dict):
+                    args_str = json.dumps(tool_call.function.arguments)
+                else:
+                    return f"Error: Invalid argument type for tool {function_name}. Expected string, got {type(tool_call.function.arguments).__name__}"
+            else:
+                args_str = tool_call.function.arguments
+
+            arguments = json.loads(args_str) if args_str else {}
             if not isinstance(arguments, dict):
                 raise json.JSONDecodeError("Arguments are not a dictionary", tool_call.function.arguments or "{}", 0)
         except json.JSONDecodeError as e:
             print(f"Error decoding JSON arguments for {function_name}: {e}", file=sys.stderr)
             print(f"Raw arguments: {tool_call.function.arguments}", file=sys.stderr)
             return f"Error: Invalid JSON arguments received for tool {function_name}: {e.msg}"  # More specific error
+        except Exception as e:  # Catch other potential errors during parsing/loading
+            print(f"Unexpected error preparing arguments for {function_name}: {e}", file=sys.stderr)
+            return f"Error: Could not prepare arguments for tool {function_name}: {e}"
 
         print(f"[Agent] Executing approved tool: {function_name}")  # Log approved execution
 
@@ -224,6 +243,19 @@ class Agent:
             yield create_stream_event(type="cancelled", content="Cancelled before API call.")
             return
 
+        service_tier = "auto"
+        if self.config.get("flex_mode", False):
+            # Ensure the model supports flex mode (optional check)
+            allowed_flex_models = {"o3", "o4-mini"}
+            if self.config["model"] in allowed_flex_models:
+                service_tier = "flex"  # Add flex tier
+                print("[Agent] Using flex service tier.", file=sys.stderr)
+            else:
+                print(
+                    f"[Agent] Warning: flex_mode enabled but model '{self.config['model']}' may not support it.",
+                    file=sys.stderr,
+                )
+
         api_messages = self._prepare_messages()
         # print("DEBUG: Sending messages to API:", file=sys.stderr)
         # pprint.pprint(api_messages, stream=sys.stderr, indent=2)
@@ -244,6 +276,7 @@ class Agent:
                     tools=self.available_tools,
                     tool_choice="auto",
                     stream=True,
+                    service_tier=service_tier,
                     # --- Added experimental feature ---
                     # stream_options={"include_usage": True}, # Uncomment if needed later
                 )
