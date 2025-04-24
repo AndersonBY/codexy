@@ -15,8 +15,8 @@ class BaseMessageDisplay(Static):
 
     DEFAULT_CSS = """
     BaseMessageDisplay {
-        width: auto; /* Let the widget size itself */
-        max-width: 85%; /* Prevent messages from becoming too wide */
+        width: auto;
+        max-width: 85%;
         min-width: 30%;
         height: auto;
     }
@@ -185,6 +185,13 @@ class ToolCallDisplay(BaseMessageDisplay):
             expand=False,
             classes="placeholder",
         )
+
+    def on_mount(self) -> None:
+        if self._finalized:
+            # It is necessary to manually update once here, because some model tool call parameters return too quickly
+            # and complete within a few deltas, causing ToolCallDisplay to not be mounted yet,
+            # which leads to an inability to correctly update args-display during finalize_arguments
+            self._update_args_display(True)
 
     def append_arguments(self, delta: str):
         if not self._finalized:
