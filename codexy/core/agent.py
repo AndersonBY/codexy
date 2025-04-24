@@ -5,9 +5,10 @@
 import os
 import sys
 import json
+import uuid
 import inspect
-import traceback
 import asyncio
+import traceback
 from pathlib import Path
 from typing import List, Dict, Set, Any, Optional, TypedDict, Union, cast, Sequence, AsyncIterator
 
@@ -29,7 +30,6 @@ from openai.types.chat import (
 )
 from openai.types.chat.chat_completion_content_part_param import ChatCompletionContentPartParam
 from openai.types.chat.chat_completion_content_part_text_param import ChatCompletionContentPartTextParam
-from openai.types.chat.chat_completion_chunk import ChoiceDelta
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
 
@@ -47,6 +47,7 @@ class StreamEvent(TypedDict):
     content: Optional[str]
     tool_call_id: Optional[str]
     tool_function_name: Optional[str]
+    # Reverted: Use tool_arguments_delta as the key name expected by the TUI
     tool_arguments_delta: Optional[str]
 
 
@@ -55,14 +56,15 @@ def create_stream_event(
     content: Optional[str] = None,
     tool_call_id: Optional[str] = None,
     tool_function_name: Optional[str] = None,
-    tool_arguments_delta: Optional[str] = None,
+    tool_arguments_delta: Optional[str] = None,  # Use delta here
 ) -> StreamEvent:
     return {
         "type": type,
         "content": content,
         "tool_call_id": tool_call_id,
         "tool_function_name": tool_function_name,
-        "tool_arguments_delta": tool_arguments_delta,
+        "tool_arguments_delta": tool_arguments_delta,  # Use delta key
+        # 'tool_arguments_complete' is no longer yielded in this event type
     }
 
 
@@ -97,6 +99,7 @@ class Agent:
         """Set the cancellation flag to interrupt the current Agent processing flow."""
         print("[Agent] Received cancellation request.", file=sys.stderr)
         self._cancelled = True
+        self._current_stream = None  # Clear reference
 
     def clear_history(self):
         """Clears the in-memory conversation history for the agent."""
@@ -124,10 +127,15 @@ class Agent:
         cleaned_messages = []
         for msg in api_messages:
             if msg.get("role") == "tool":
-                if msg.get("content") is not None:
-                    cleaned_messages.append(msg)
-                else:
+                # Tool message content MUST be a string. Ensure it is.
+                content = msg.get("content")
+                if content is None:
                     print(f"Warning: Filtering out tool message with None content: {msg}", file=sys.stderr)
+                elif not isinstance(content, str):
+                    print(f"Warning: Converting non-string tool content to string: {msg}", file=sys.stderr)
+                    cleaned_messages.append({**msg, "content": str(content)})
+                else:
+                    cleaned_messages.append(msg)
             else:
                 cleaned_messages.append(msg)
 
@@ -228,10 +236,9 @@ class Agent:
         if prompt:
             user_content: Union[str, Sequence[ChatCompletionContentPartParam]]
             if image_paths:
-                # TODO: Implement image handling
                 print("Warning: Image input processing is not fully implemented yet.", file=sys.stderr)
                 text_part: ChatCompletionContentPartTextParam = {"type": "text", "text": prompt}
-                user_content = [text_part]  # Only text for now
+                user_content = [text_part]
             else:
                 user_content = prompt
             user_message: ChatCompletionUserMessageParam = {"role": "user", "content": user_content}
@@ -281,7 +288,7 @@ class Agent:
                     # --- Added experimental feature ---
                     # stream_options={"include_usage": True}, # Uncomment if needed later
                 )
-                self._current_stream = stream  # 保存流引用
+                self._current_stream = stream
                 print("[Agent] Stream connection established.", file=sys.stderr)
 
                 assistant_message_accumulator: Dict[str, Any] = {
@@ -290,7 +297,8 @@ class Agent:
                     "tool_calls": [],
                 }
                 started_tool_call_indices: Set[int] = set()
-                tool_arguments_buffers: Dict[int, str] = {}
+                tool_arguments_complete: Dict[int, str] = {}
+                next_tool_index = 0  # Counter for assigning index if missing
 
                 async for chunk in stream:
                     if self._cancelled:
@@ -298,8 +306,11 @@ class Agent:
                         # await stream.close() # If supported
                         return
 
-                    delta: Optional[ChoiceDelta] = chunk.choices[0].delta if chunk.choices else None
-                    finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
 
                     if delta:
                         if delta.content:
@@ -310,98 +321,131 @@ class Agent:
                             yield create_stream_event(type="text_delta", content=text_delta)
 
                         if delta.tool_calls:
-                            if not isinstance(assistant_message_accumulator["tool_calls"], list):
+                            if not isinstance(assistant_message_accumulator.get("tool_calls"), list):
                                 assistant_message_accumulator["tool_calls"] = []
                             tool_calls_list = assistant_message_accumulator["tool_calls"]
 
                             for tool_call_chunk in delta.tool_calls:
+                                # --- Handle missing index ---
+                                index: int
                                 if tool_call_chunk.index is None:
-                                    continue
-                                index = tool_call_chunk.index
+                                    # Assign the next available index
+                                    index = next_tool_index
+                                    next_tool_index += 1
+                                    print(
+                                        f"Warning: Tool call chunk missing index, assigned index {index}",
+                                        file=sys.stderr,
+                                    )
+                                else:
+                                    index = tool_call_chunk.index
+                                    # Update next_tool_index if we receive an explicit index
+                                    next_tool_index = max(next_tool_index, index + 1)
+                                # ------------------------------
+
+                                # Ensure list is long enough
                                 while len(tool_calls_list) <= index:
                                     tool_calls_list.append(
                                         {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
                                     )
                                 current_call_entry = tool_calls_list[index]
 
+                                # --- Handle missing ID ---
                                 if tool_call_chunk.id:
                                     current_call_entry["id"] = tool_call_chunk.id
-                                if tool_call_chunk.function:
-                                    current_function_entry = current_call_entry.setdefault(
-                                        "function", {"name": None, "arguments": ""}
+                                elif (
+                                    current_call_entry["id"] is None and tool_call_chunk.function
+                                ):  # Generate only if not already assigned
+                                    # Generate a temporary ID if missing
+                                    temp_id = f"tool_call_id_{index}-{uuid.uuid4()}"
+                                    current_call_entry["id"] = temp_id
+                                    print(
+                                        f"Warning: Tool call chunk missing ID at index {index}, generated temporary ID: {temp_id}",
+                                        file=sys.stderr,
                                     )
-                                    if tool_call_chunk.function.name:
-                                        func_name = tool_call_chunk.function.name
-                                        current_function_entry["name"] = func_name
-                                        # Yield start only once per tool call index, when id and name are known
-                                        if index not in started_tool_call_indices and current_call_entry.get("id"):
-                                            started_tool_call_indices.add(index)
-                                            yield create_stream_event(
-                                                type="tool_call_start",
-                                                tool_call_id=current_call_entry["id"],
-                                                tool_function_name=func_name,
-                                            )
+                                # -------------------------
 
-                                    if tool_call_chunk.function.arguments:
-                                        args_delta = tool_call_chunk.function.arguments
-                                        # Accumulate in separate buffer first
-                                        tool_arguments_buffers[index] = (
-                                            tool_arguments_buffers.get(index, "") + args_delta
+                                # Update Name if present
+                                if tool_call_chunk.function and tool_call_chunk.function.name:
+                                    current_call_entry["function"]["name"] = tool_call_chunk.function.name
+
+                                # Yield start event only once when ID and Name are first known
+                                current_id = current_call_entry.get("id")
+                                current_name = current_call_entry.get("function", {}).get("name")
+                                if index not in started_tool_call_indices and current_id and current_name:
+                                    started_tool_call_indices.add(index)
+                                    yield create_stream_event(
+                                        type="tool_call_start",
+                                        tool_call_id=current_id,
+                                        tool_function_name=current_name,
+                                    )
+
+                                # Handle arguments
+                                if (
+                                    tool_call_chunk.function and tool_call_chunk.function.arguments is not None
+                                ):  # Check for None
+                                    args_chunk = tool_call_chunk.function.arguments
+                                    # Accumulate/store complete arguments
+                                    tool_arguments_complete[index] = (
+                                        tool_arguments_complete.get(index, "") + args_chunk
+                                    )
+                                    # Update the main accumulator immediately
+                                    current_call_entry["function"]["arguments"] = tool_arguments_complete[index]
+
+                                    if current_id:  # Yield delta only if we have an ID
+                                        yield create_stream_event(
+                                            type="tool_call_delta",
+                                            tool_call_id=current_id,
+                                            tool_arguments_delta=args_chunk,
                                         )
-                                        if current_call_entry.get("id"):
-                                            yield create_stream_event(
-                                                type="tool_call_delta",
-                                                tool_call_id=current_call_entry["id"],
-                                                tool_arguments_delta=args_delta,
-                                            )
 
+                    # Check finish_reason *after* processing delta
                     if finish_reason:
                         print(f"[Agent] Stream chunk finished with reason: {finish_reason}", file=sys.stderr)
+                        # <<< Break the loop on ANY finish reason >>>
                         break
 
-                # After the loop, finalize arguments
-                for index, accumulated_args in tool_arguments_buffers.items():
-                    if index < len(assistant_message_accumulator["tool_calls"]):
-                        assistant_message_accumulator["tool_calls"][index]["function"]["arguments"] = accumulated_args
-
-                # --- After stream finishes ---
+                # <<< AFTER the async for loop (stream finished or break) >>>
                 if self._cancelled:
                     yield create_stream_event(type="cancelled", content="Cancelled after stream.")
                     return
 
-                # Process accumulated message
+                # <<< CONSOLIDATED FINALIZATION of Tool Calls >>>
                 final_tool_calls_for_history: List[ChatCompletionMessageToolCall] = []
                 if isinstance(assistant_message_accumulator.get("tool_calls"), list):
                     for index, tool_call_data in enumerate(assistant_message_accumulator["tool_calls"]):
-                        if (
-                            isinstance(tool_call_data, dict)
-                            and tool_call_data.get("id")
-                            and isinstance(tool_call_data.get("function"), dict)
-                            and tool_call_data["function"].get("name")
-                        ):
-                            args = tool_call_data["function"].get("arguments", "")
-                            if not isinstance(args, str):
-                                args = str(args)
+                        # Use assigned ID and check for name
+                        final_id = tool_call_data.get("id")
+                        final_name = tool_call_data.get("function", {}).get("name")
+
+                        if final_id and final_name:
+                            # Use the potentially complete arguments buffer
+                            final_args = tool_arguments_complete.get(
+                                index, tool_call_data["function"].get("arguments", "")
+                            )
+                            # Ensure final args are stored in the accumulator entry
+                            tool_call_data["function"]["arguments"] = final_args
+                            if not isinstance(final_args, str):
+                                final_args = str(final_args)  # Ensure string
+
                             try:
                                 final_call = ChatCompletionMessageToolCall(
-                                    id=str(tool_call_data["id"]),
-                                    function=OpenAIFunction(
-                                        name=str(tool_call_data["function"]["name"]), arguments=args
-                                    ),
+                                    id=str(final_id),
+                                    function=OpenAIFunction(name=str(final_name), arguments=final_args),
                                     type="function",
                                 )
+                                # Yield end event if it was started
                                 if index in started_tool_call_indices:
                                     yield create_stream_event(type="tool_call_end", tool_call_id=final_call.id)
                                 final_tool_calls_for_history.append(final_call)
                             except Exception as e:
-                                print(f"Error creating final tool call object: {e}", file=sys.stderr)
+                                print(f"Error creating final tool call object post-loop: {e}", file=sys.stderr)
                         else:
                             print(
-                                f"Warning: Skipping incomplete tool call at index {index} in final assembly: {tool_call_data}",
+                                f"Warning: Skipping incomplete tool call at index {index} in final assembly post-loop: {tool_call_data}",
                                 file=sys.stderr,
                             )
 
-                # Assemble final assistant message for history
+                # <<< Assemble final message for history >>>
                 final_assistant_msg_dict: Dict[str, Any] = {"role": "assistant"}
                 content = assistant_message_accumulator.get("content")
                 if content:
@@ -409,23 +453,21 @@ class Agent:
                 if final_tool_calls_for_history:
                     final_assistant_msg_dict["tool_calls"] = final_tool_calls_for_history
 
-                # Only add if it has content or tool calls
+                # <<< Add to history and set pending calls >>>
                 if "content" in final_assistant_msg_dict or "tool_calls" in final_assistant_msg_dict:
-                    # <<< 添加最终消息到历史记录 >>>
                     self.history.append(cast(ChatCompletionMessageParam, final_assistant_msg_dict))
-                    # <<< 设置待处理的工具调用 >>>
+                    # Set pending calls based on the *finalized* list from this turn
                     self.pending_tool_calls = final_tool_calls_for_history if final_tool_calls_for_history else None
                     print(
                         f"[Agent] Final message added. Pending tools: {len(self.pending_tool_calls or [])}",
                         file=sys.stderr,
                     )
-                    # Get the last response ID if the response object is available (might not be for all chunk types)
-                    # This part needs careful handling depending on how the stream yields completion info.
-                    # If the final chunk/event contains the response ID, capture it here.
-                    # For now, assuming it's not directly available in the loop's final state easily.
-                    # We might need to capture it from the `response.completed` event if that existed.
-                    # Let's assume for now the last_response_id isn't reliably available here without more complex stream handling.
-                    # self.last_response_id = chunk.response_id or self.last_response_id # Placeholder
+                    # Capture last response ID if available (might need specific event handling)
+                    # Example: self.last_response_id = get_response_id_from_stream_end(stream)
+                else:
+                    # No actual content or tool calls produced by the assistant
+                    self.pending_tool_calls = None  # Ensure pending calls are cleared
+                    print("[Agent] Assistant produced no text or tool calls.", file=sys.stderr)
 
                 yield create_stream_event(type="response_end")
                 return  # Success, exit retry loop
@@ -439,44 +481,35 @@ class Agent:
                 APIError,
                 BadRequestError,
             ) as e:
-                last_error = e  # Store last error
+                last_error = e
                 error_msg = f"{type(e).__name__}: {e}"
                 print(f"[Agent] Attempt {attempt + 1} failed: {error_msg}", file=sys.stderr)
-
-                should_retry = False
-                status_code = getattr(e, "status_code", None)  # Get status code safely
-
-                if isinstance(e, (APITimeoutError, APIConnectionError)) and attempt < MAX_RETRIES - 1:
-                    should_retry = True
-                elif isinstance(e, RateLimitError) and attempt < MAX_RETRIES - 1:
-                    should_retry = True
-                elif (
-                    isinstance(e, APIStatusError) and status_code and status_code >= 500 and attempt < MAX_RETRIES - 1
-                ):
-                    should_retry = True
-                # Add check for BadRequestError (400) specifically for context length
-                elif isinstance(e, BadRequestError) and status_code == 400:
-                    # Check if it's a context length error message
+                status_code = getattr(e, "status_code", None)
+                should_retry = (
+                    isinstance(e, (APITimeoutError, APIConnectionError))
+                    or isinstance(e, RateLimitError)
+                    or (isinstance(e, APIStatusError) and status_code and status_code >= 500)
+                ) and attempt < MAX_RETRIES - 1
+                if isinstance(e, BadRequestError) and status_code == 400:
                     error_body = getattr(e, "body", {})
                     error_detail = (
                         error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
                     )
                     if "context_length_exceeded" in error_detail or "maximum context length" in error_detail:
-                        friendly_error = "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
-                        yield create_stream_event(type="error", content=friendly_error)
-                        return  # Do not retry context length errors
+                        yield create_stream_event(
+                            type="error",
+                            content="Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session.",
+                        )
+                        return
                     else:
-                        # Other 400 errors are likely permanent
                         print("[Agent] Non-retryable 400 Bad Request error.", file=sys.stderr)
-
                 if should_retry:
                     print(f"[Agent] Retrying in {current_retry_delay:.2f} seconds...", file=sys.stderr)
                     await asyncio.sleep(current_retry_delay)
                     current_retry_delay = min(current_retry_delay * 2, MAX_RETRY_DELAY_SECONDS)
-                    continue  # Next attempt
+                    continue
                 else:
-                    # Final attempt failed or non-retryable error
-                    friendly_error = error_msg  # Default
+                    friendly_error = error_msg
                     if isinstance(e, APIStatusError):
                         try:
                             error_body = e.response.json()
@@ -487,12 +520,11 @@ class Agent:
                             )
                             friendly_error = f"API Error (Status {e.status_code}): {message}"
                         except Exception:
-                            pass  # Keep original if parsing fails
+                            pass
                     elif isinstance(e, RateLimitError):
                         friendly_error = f"API Rate Limit Error: {e}"
-                    elif isinstance(e, BadRequestError):  # Handle other 400 errors
+                    elif isinstance(e, BadRequestError):
                         friendly_error = f"API Bad Request Error: {e}"
-
                     yield create_stream_event(type="error", content=f"Error: {friendly_error}")
                     return
             except Exception as e:
@@ -501,12 +533,10 @@ class Agent:
                 traceback.print_exc(file=sys.stderr)
                 if attempt == MAX_RETRIES - 1:
                     yield create_stream_event(
-                        type="error",
-                        content=f"Error: Max retries reached. Unexpected error: {e}",
+                        type="error", content=f"Error: Max retries reached. Unexpected error: {e}"
                     )
                     return
-                # Retry on unexpected errors too? Might be risky. Let's retry once.
-                if attempt < 1:  # Only retry unexpected errors once
+                if attempt < 1:
                     print(
                         f"[Agent] Retrying unexpected error in {current_retry_delay:.2f} seconds...", file=sys.stderr
                     )
@@ -547,11 +577,17 @@ class Agent:
                 and result.get("role") == "tool"
                 and "tool_call_id" in result
                 and "content" in result
-                and result.get("content") is not None
+                # Tool content MUST be a string for OpenAI API
+                and isinstance(result.get("content"), str)
             ):
                 self.history.append(result)
             else:
-                print(f"Warning: Skipping invalid tool result format: {result}", file=sys.stderr)
+                content_val = result.get("content") if isinstance(result, dict) else "N/A"
+                content_type = type(content_val).__name__
+                print(
+                    f"Warning: Skipping invalid tool result format or non-string content (type: {content_type}): {result}",
+                    file=sys.stderr,
+                )
 
         # Call process_turn_stream without prompt to continue
         async for event in self.process_turn_stream():
