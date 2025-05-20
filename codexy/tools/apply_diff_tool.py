@@ -87,11 +87,24 @@ def apply_diff_tool(path: str, diff: str) -> str:
 
     for start_line, search_content, replace_content in diff_blocks:
         start_idx = start_line - 1  # Convert to 0-based index
-        search_lines = search_content.splitlines(keepends=True)  # Keep newlines for accurate comparison
-        num_search_lines = len(search_lines)
 
-        # Ensure consistent line endings for comparison
-        search_lines = [line.replace("\r\n", "\n") for line in search_lines]
+        if "\n" not in search_content:
+            if start_idx < len(modified_lines):
+                current_line = modified_lines[start_idx].rstrip("\r\n")
+                if current_line == search_content:
+                    modified_lines[start_idx] = replace_content + "\n"
+                    applied_count += 1
+                    print(f"Successfully applied single-line diff block at line {start_line} to {path}")
+                    continue
+                else:
+                    print(f"Single line mismatch - expected: '{search_content}', actual: '{current_line}'")
+
+            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
+            continue
+
+        # Multi-line processing
+        search_lines = search_content.splitlines()
+        num_search_lines = len(search_lines)
 
         # Check bounds
         if start_idx < 0 or start_idx + num_search_lines > len(modified_lines):
@@ -100,37 +113,26 @@ def apply_diff_tool(path: str, diff: str) -> str:
             )
             continue  # Skip this block
 
-        # Extract the actual lines from the file to compare
-        actual_lines_slice = modified_lines[start_idx : start_idx + num_search_lines]
-        # Ensure consistent line endings for comparison
-        actual_lines_slice = [line.replace("\r\n", "\n") for line in actual_lines_slice]
+        # Extract corresponding lines from file and remove line endings for content comparison
+        match = True
+        for i, search_line in enumerate(search_lines):
+            file_line = modified_lines[start_idx + i].rstrip("\r\n")
+            if file_line != search_line:
+                print(f"Line {start_line + i} mismatch: '{file_line}' != '{search_line}'")
+                match = False
+                break
 
-        # --- Exact Match Check ---
-        # Reconstruct the string from the slice for direct comparison
-        # Note: splitlines(keepends=True) might add a trailing newline if the original didn't have one,
-        # so comparing line-by-line or carefully reconstructing might be needed.
-        # Let's compare reconstructed strings after normalizing newlines.
-        actual_content_str = "".join(actual_lines_slice)
-        search_content_str = "".join(search_lines)
-
-        if actual_content_str == search_content_str:
-            # --- Apply the replacement ---
-            replace_lines = replace_content.splitlines(keepends=True)
-            # Ensure consistent line endings for writing
-            replace_lines = [line.replace("\r\n", "\n") for line in replace_lines]
+        if match:
+            # Apply replacement
+            replace_lines = [line + "\n" for line in replace_content.splitlines()]
+            if not replace_lines:  # Handle empty replacement content
+                replace_lines = [""]
 
             modified_lines[start_idx : start_idx + num_search_lines] = replace_lines
             applied_count += 1
-            print(f"Successfully applied diff block starting at line {start_line} to {path}")
+            print(f"Successfully applied multi-line diff block starting at line {start_line} to {path}")
         else:
-            # --- Match Failed ---
-            errors.append(
-                f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content."
-            )
-            # For debugging:
-            # print(f"DEBUG: Mismatch at line {start_line}")
-            # print("Expected:\n" + search_content_str)
-            # print("Actual:\n" + actual_content_str)
+            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
 
     # --- Write Modified Content Back ---
     if applied_count > 0 and not errors:  # Only write if at least one block applied and no errors occurred
