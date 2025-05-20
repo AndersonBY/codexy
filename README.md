@@ -68,14 +68,21 @@ Next, set your OpenAI API key as an environment variable:
 
 ```shell
 export OPENAI_API_KEY="your-api-key-here"
+# Optional: Set a custom base URL for the OpenAI API (e.g., for a proxy or self-hosted service)
+# export OPENAI_BASE_URL="your-custom-base-url"
+# Optional: Set the API request timeout in milliseconds
+# export OPENAI_TIMEOUT_MS="300000" # e.g., 300000 for 5 minutes
 ```
 
 > **Note:** This command sets the key only for your current terminal session. To make it permanent, add the `export` line to your shell's configuration file (e.g., `~/.zshrc`, `~/.bashrc`).
 >
-> **Tip:** You can also place your API key into a `.env` file at the root of your project:
+> **Tip:** You can also place your API key and other environment variables into a `.env` file at the root of your project:
 >
 > ```env
 > OPENAI_API_KEY=your-api-key-here
+> # Optional:
+> # OPENAI_BASE_URL=your-custom-base-url
+> # OPENAI_TIMEOUT_MS=300000
 > ```
 >
 > The CLI will automatically load variables from `.env` using `python-dotenv`.

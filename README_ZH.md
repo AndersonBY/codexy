@@ -68,14 +68,21 @@ pip install -U codexy
 
 ```shell
 export OPENAI_API_KEY="你的-API-密钥"
+# 可选：为 OpenAI API 设置自定义基础 URL（例如，用于代理或自托管服务）
+# export OPENAI_BASE_URL="你的自定义基础URL"
+# 可选：设置 API 请求超时时间（毫秒）
+# export OPENAI_TIMEOUT_MS="300000" # 例如：300000 代表 5 分钟
 ```
 
 > **注意:** 此命令仅为当前终端会话设置密钥。要使其永久生效，请将 `export` 行添加到您的 shell 配置文件中（例如 `~/.zshrc`、`~/.bashrc`）。
 >
-> **提示:** 您也可以将 API 密钥放在项目根目录下的 `.env` 文件中：
+> **提示:** 您也可以将 API 密钥和其他环境变量放在项目根目录下的 `.env` 文件中：
 >
 > ```env
 > OPENAI_API_KEY=你的-API-密钥
+> # 可选:
+> # OPENAI_BASE_URL=你的自定义基础URL
+> # OPENAI_TIMEOUT_MS=300000
 > ```
 >
 > CLI 将使用 `python-dotenv` 自动加载 `.env` 文件中的变量。
