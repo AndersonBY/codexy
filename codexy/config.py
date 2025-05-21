@@ -28,6 +28,12 @@ DEFAULT_HISTORY_SAVE = True
 DEFAULT_SAFE_COMMANDS: List[str] = []
 DEFAULT_FULL_STDOUT = False
 
+# Memory defaults
+DEFAULT_MEMORY_ENABLED = False # General memory enabled default
+DEFAULT_MEMORY_ENABLE_COMPRESSION = False
+DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR = 0.8
+DEFAULT_MEMORY_KEEP_RECENT_MESSAGES = 5
+
 # Configuration directories and files
 HOME_DIR = Path.home()
 CONFIG_DIR = HOME_DIR / ".codexy"  # Use a different directory for the Python version
@@ -60,6 +66,9 @@ class MemoryConfig(TypedDict, total=False):
     """Configuration for agent memory (if implemented)."""
 
     enabled: bool
+    enable_compression: bool  # Default: False
+    compression_threshold_factor: float  # Default: 0.8
+    keep_recent_messages: int  # Default: 5
 
 
 class StoredConfig(TypedDict, total=False):
@@ -102,6 +111,12 @@ EMPTY_STORED_CONFIG: StoredConfig = {
     "model": "",  # Empty string ensures default is used on load
     "approval_mode": DEFAULT_APPROVAL_MODE,
     "full_auto_error_mode": DEFAULT_FULL_AUTO_ERROR_MODE,
+    "memory": {
+        "enabled": DEFAULT_MEMORY_ENABLED,
+        "enable_compression": DEFAULT_MEMORY_ENABLE_COMPRESSION,
+        "compression_threshold_factor": DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR,
+        "keep_recent_messages": DEFAULT_MEMORY_KEEP_RECENT_MESSAGES,
+    },
     "notify": DEFAULT_NOTIFY,
     "history": {
         "max_size": DEFAULT_HISTORY_MAX_SIZE,
@@ -299,13 +314,74 @@ def load_config(
             )
         full_auto_error_mode = DEFAULT_FULL_AUTO_ERROR_MODE
 
+    # --- Merging Config ---
+    stored_model = stored_config.get("model")
+    model = (
+        stored_model.strip()
+        if stored_model and stored_model.strip()
+        else (DEFAULT_FULL_CONTEXT_MODEL if is_full_context else DEFAULT_AGENTIC_MODEL)
+    )
+
+    loaded_history_config = stored_config.get("history") or {}
+    runtime_history: HistoryConfig = {
+        "max_size": loaded_history_config.get("max_size", DEFAULT_HISTORY_MAX_SIZE),
+        "save_history": loaded_history_config.get("save_history", DEFAULT_HISTORY_SAVE),
+    }
+
+    # Validate and set user's preferred approval mode, defaulting to SUGGEST
+    approval_mode_str = stored_config.get("approval_mode", DEFAULT_APPROVAL_MODE) or DEFAULT_APPROVAL_MODE
+    try:
+        _ = ApprovalMode(approval_mode_str)
+        user_preferred_approval_mode = approval_mode_str
+    except ValueError:
+        print(
+            f"Warning: Invalid approval_mode '{approval_mode_str}' in config. Using default '{DEFAULT_APPROVAL_MODE}'."
+        )
+        user_preferred_approval_mode = DEFAULT_APPROVAL_MODE
+
+    # Load safe commands, defaulting to empty list
+    safe_commands = stored_config.get("safe_commands", [])
+    if not isinstance(safe_commands, list) or not all(isinstance(s, str) for s in safe_commands):
+        print("Warning: Invalid 'safe_commands' format in config. Expected list of strings. Ignoring.")
+        safe_commands = list(DEFAULT_SAFE_COMMANDS)  # Use default
+
+    # Load full_auto_error_mode, validate and provide default
+    full_auto_error_mode = stored_config.get("full_auto_error_mode")
+    if full_auto_error_mode not in ["ask-user", "ignore-and-continue"]:
+        if full_auto_error_mode is not None:  # Warn only if an invalid value was provided
+            print(
+                f"Warning: Invalid full_auto_error_mode '{full_auto_error_mode}' in config. Using default '{DEFAULT_FULL_AUTO_ERROR_MODE}'."
+            )
+        full_auto_error_mode = DEFAULT_FULL_AUTO_ERROR_MODE
+
+    # Process memory configuration
+    loaded_memory_config = stored_config.get("memory") or {}
+    runtime_memory: Optional[MemoryConfig] = None
+    if loaded_memory_config.get("enabled", DEFAULT_MEMORY_ENABLED): # Check if memory is enabled
+        runtime_memory = {
+            "enabled": True,
+            "enable_compression": loaded_memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION),
+            "compression_threshold_factor": loaded_memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR),
+            "keep_recent_messages": loaded_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES),
+        }
+    elif "enabled" in loaded_memory_config: # if "enabled" is explicitly false
+        runtime_memory = { # Ensure this dict is created even if memory is explicitly disabled
+            "enabled": False, 
+            "enable_compression": loaded_memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION), # Still load or default other keys
+            "compression_threshold_factor": loaded_memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR),
+            "keep_recent_messages": loaded_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES),
+        }
+    # If memory key doesn't exist in stored_config or "enabled" is not in loaded_memory_config, 
+    # and not explicitly set to false, runtime_memory remains None (memory disabled by default implicitly)
+    # However, if it was explicitly set to false, runtime_memory will contain "enabled": False and defaults for others.
+
     # --- Final AppConfig Assembly ---
     app_config: AppConfig = {
         "api_key": OPENAI_API_KEY or None,
         "model": model,
         "instructions": combined_instructions,
         "full_auto_error_mode": full_auto_error_mode,
-        "memory": stored_config.get("memory"),
+        "memory": runtime_memory,  # Use the processed memory config
         "notify": stored_config.get("notify", DEFAULT_NOTIFY) or False,
         "history": runtime_history,
         "safe_commands": safe_commands,
@@ -386,8 +462,36 @@ def save_config(
         config_to_save["approval_mode"] = config["effective_approval_mode"]
     if config.get("full_auto_error_mode") and config["full_auto_error_mode"] != DEFAULT_FULL_AUTO_ERROR_MODE:
         config_to_save["full_auto_error_mode"] = config["full_auto_error_mode"]
-    if config.get("memory") is not None:
-        config_to_save["memory"] = config["memory"]
+
+    # Save memory config only if it exists and differs from defaults
+    current_memory_config = config.get("memory")
+    if current_memory_config is not None:
+        # Only save memory field if it's enabled or if any of its sub-fields differ from default
+        save_memory_config = False
+        if current_memory_config.get("enabled", DEFAULT_MEMORY_ENABLED) != DEFAULT_MEMORY_ENABLED:
+            save_memory_config = True
+        if current_memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION) != DEFAULT_MEMORY_ENABLE_COMPRESSION:
+            save_memory_config = True
+        if current_memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR) != DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR:
+            save_memory_config = True
+        if current_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES) != DEFAULT_MEMORY_KEEP_RECENT_MESSAGES:
+            save_memory_config = True
+        
+        if save_memory_config:
+            # Store only the fields that are meant to be in StoredConfig.
+            # If memory is disabled, but other fields were modified from default, store them.
+            memory_to_save: MemoryConfig = {
+                "enabled": current_memory_config.get("enabled", DEFAULT_MEMORY_ENABLED)
+            }
+            if memory_to_save["enabled"] or \
+               current_memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION) != DEFAULT_MEMORY_ENABLE_COMPRESSION or \
+               current_memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR) != DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR or \
+               current_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES) != DEFAULT_MEMORY_KEEP_RECENT_MESSAGES:
+                memory_to_save["enable_compression"] = current_memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION)
+                memory_to_save["compression_threshold_factor"] = current_memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR)
+                memory_to_save["keep_recent_messages"] = current_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES)
+            config_to_save["memory"] = memory_to_save
+
     if config.get("notify") != DEFAULT_NOTIFY:
         config_to_save["notify"] = config["notify"]
 

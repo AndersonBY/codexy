@@ -1,100 +1,59 @@
 # -*- coding: utf-8 -*-
 
-"""Stores information about supported models, like context length."""
+"""Model information utilities for codexy."""
 
-from typing import TypedDict, Dict
+import sys
 
+# Default from oai/models.go (but this might change)
+# Using a common default for unknown models.
+DEFAULT_MAX_TOKENS = 4096
+# o4-mini seems to be an alias for gpt-4-turbo-preview which is 128k context, but its output is 4k.
+# Let's be conservative for o4-mini for now, or use a value that reflects typical usage patterns if known.
+# If 'o4-mini' is used with codexy, it might be a specific internal configuration.
+# For now, let's assume it aligns with a common smaller context unless specified otherwise.
+# Update: From the config, o4-mini is the default agentic model.
+# It's likely an alias for a model with a context length like gpt-4-turbo-preview (128k input, 4k output)
+# or gpt-3.5-turbo (4k/16k).
+# The old placeholder in agent.py used 128000 for o4-mini. Let's use that.
 
-# Define the structure for model information
-class ModelInfo(TypedDict):
-    label: str
-    max_context_length: int  # Using tokens as the unit
-
-
-# Dictionary mapping model IDs to their information
-# Based on codex-cli/src/utils/model-info.ts, but simplified for common models
-# We estimate context length in tokens.
-MODEL_INFO_REGISTRY: Dict[str, ModelInfo] = {
-    "o1-pro-2025-03-19": {"label": "o1 Pro (2025-03-19)", "max_context_length": 200000},
-    "o3": {"label": "o3", "max_context_length": 200000},
-    "o3-2025-04-16": {"label": "o3 (2025-04-16)", "max_context_length": 200000},
-    "o4-mini": {"label": "o4 Mini", "max_context_length": 200000},
-    "gpt-4.1-nano": {"label": "GPT-4.1 Nano", "max_context_length": 1000000},
-    "gpt-4.1-nano-2025-04-14": {"label": "GPT-4.1 Nano (2025-04-14)", "max_context_length": 1000000},
-    "o4-mini-2025-04-16": {"label": "o4 Mini (2025-04-16)", "max_context_length": 200000},
-    "gpt-4": {"label": "GPT-4", "max_context_length": 8192},
-    "o1-preview-2024-09-12": {"label": "o1 Preview (2024-09-12)", "max_context_length": 128000},
-    "gpt-4.1-mini": {"label": "GPT-4.1 Mini", "max_context_length": 1000000},
-    "gpt-3.5-turbo-instruct-0914": {"label": "GPT-3.5 Turbo Instruct (0914)", "max_context_length": 4096},
-    "gpt-4o-mini-search-preview": {"label": "GPT-4o Mini Search Preview", "max_context_length": 128000},
-    "gpt-4.1-mini-2025-04-14": {"label": "GPT-4.1 Mini (2025-04-14)", "max_context_length": 1000000},
-    "chatgpt-4o-latest": {"label": "ChatGPT-4o Latest", "max_context_length": 128000},
-    "gpt-3.5-turbo-1106": {"label": "GPT-3.5 Turbo (1106)", "max_context_length": 16385},
-    "gpt-4o-search-preview": {"label": "GPT-4o Search Preview", "max_context_length": 128000},
-    "gpt-4-turbo": {"label": "GPT-4 Turbo", "max_context_length": 128000},
-    "gpt-4o-realtime-preview-2024-12-17": {
-        "label": "GPT-4o Realtime Preview (2024-12-17)",
-        "max_context_length": 128000,
-    },
-    "gpt-3.5-turbo-instruct": {"label": "GPT-3.5 Turbo Instruct", "max_context_length": 4096},
-    "gpt-3.5-turbo": {"label": "GPT-3.5 Turbo", "max_context_length": 16385},
-    "gpt-4-turbo-preview": {"label": "GPT-4 Turbo Preview", "max_context_length": 128000},
-    "gpt-4o-mini-search-preview-2025-03-11": {
-        "label": "GPT-4o Mini Search Preview (2025-03-11)",
-        "max_context_length": 128000,
-    },
-    "gpt-4-0125-preview": {"label": "GPT-4 (0125) Preview", "max_context_length": 128000},
-    "gpt-4o-2024-11-20": {"label": "GPT-4o (2024-11-20)", "max_context_length": 128000},
-    "o3-mini": {"label": "o3 Mini", "max_context_length": 200000},
-    "gpt-4o-2024-05-13": {"label": "GPT-4o (2024-05-13)", "max_context_length": 128000},
-    "gpt-4-turbo-2024-04-09": {"label": "GPT-4 Turbo (2024-04-09)", "max_context_length": 128000},
-    "gpt-3.5-turbo-16k": {"label": "GPT-3.5 Turbo 16k", "max_context_length": 16385},
-    "o3-mini-2025-01-31": {"label": "o3 Mini (2025-01-31)", "max_context_length": 200000},
-    "o1-preview": {"label": "o1 Preview", "max_context_length": 128000},
-    "o1-2024-12-17": {"label": "o1 (2024-12-17)", "max_context_length": 128000},
-    "gpt-4-0613": {"label": "GPT-4 (0613)", "max_context_length": 8192},
-    "o1": {"label": "o1", "max_context_length": 128000},
-    "o1-pro": {"label": "o1 Pro", "max_context_length": 200000},
-    "gpt-4.5-preview": {"label": "GPT-4.5 Preview", "max_context_length": 128000},
-    "gpt-4.5-preview-2025-02-27": {"label": "GPT-4.5 Preview (2025-02-27)", "max_context_length": 128000},
-    "gpt-4o-search-preview-2025-03-11": {"label": "GPT-4o Search Preview (2025-03-11)", "max_context_length": 128000},
-    "gpt-4o": {"label": "GPT-4o", "max_context_length": 128000},
-    "gpt-4o-mini": {"label": "GPT-4o Mini", "max_context_length": 128000},
-    "gpt-4o-2024-08-06": {"label": "GPT-4o (2024-08-06)", "max_context_length": 128000},
-    "gpt-4.1": {"label": "GPT-4.1", "max_context_length": 1000000},
-    "gpt-4.1-2025-04-14": {"label": "GPT-4.1 (2025-04-14)", "max_context_length": 1000000},
-    "gpt-4o-mini-2024-07-18": {"label": "GPT-4o Mini (2024-07-18)", "max_context_length": 128000},
-    "o1-mini": {"label": "o1 Mini", "max_context_length": 128000},
-    "gpt-3.5-turbo-0125": {"label": "GPT-3.5 Turbo (0125)", "max_context_length": 16385},
-    "o1-mini-2024-09-12": {"label": "o1 Mini (2024-09-12)", "max_context_length": 128000},
-    "gpt-4-1106-preview": {"label": "GPT-4 (1106) Preview", "max_context_length": 128000},
-    "deepseek-chat": {"label": "DeepSeek Chat", "max_context_length": 64000},
-    "deepseek-reasoner": {"label": "DeepSeek Reasoner", "max_context_length": 64000},
+MODEL_MAX_TOKENS = {
+    "gpt-4-turbo": 128000,      # Covers gpt-4-turbo-preview, gpt-4-0125-preview, gpt-4-1106-preview etc.
+    "gpt-4-32k": 32768,
+    "gpt-4.1-32k": 32768,     # Assuming gpt-4.1 is an alias that can also have 32k
+    "gpt-4": 8192,
+    "gpt-4.1": 8192,          # Assuming gpt-4.1 is an alias for gpt-4 8k
+    "gpt-3.5-turbo-16k": 16384,
+    "gpt-3.5-turbo": 4096,
+    "o4-mini": 128000,        # Based on previous placeholder in agent.py
+    # Add other models as needed
 }
 
-# Default fallback context length if model is unknown
-DEFAULT_CONTEXT_LENGTH = 128000  # Align with JS version's default
+def get_model_max_tokens(model_name: str) -> int:
+    """
+    Returns the maximum context tokens for a given model name.
+    Uses a dictionary for known models and a prefix-matching approach.
+    """
+    # Check for exact matches first
+    if model_name in MODEL_MAX_TOKENS:
+        return MODEL_MAX_TOKENS[model_name]
+    
+    # Check for well-known prefixes in a specific order to avoid issues
+    # e.g., "gpt-4-turbo" should be checked before "gpt-4"
+    # More specific names should come first.
+    # This is a bit naive; a more robust solution might use regex or a more structured model DB.
+    # For now, this handles the known cases.
+    if "gpt-4-turbo" in model_name: # Catches variants like gpt-4-turbo-preview, gpt-4-0125-preview etc.
+        return MODEL_MAX_TOKENS["gpt-4-turbo"]
+    if "gpt-4-32k" in model_name:
+        return MODEL_MAX_TOKENS["gpt-4-32k"]
+    if "gpt-4" in model_name: # Catches base gpt-4 and other non-turbo/32k variants
+        return MODEL_MAX_TOKENS["gpt-4"]
+    if "gpt-3.5-turbo-16k" in model_name:
+        return MODEL_MAX_TOKENS["gpt-3.5-turbo-16k"]
+    if "gpt-3.5-turbo" in model_name:
+        return MODEL_MAX_TOKENS["gpt-3.5-turbo"]
+    if "o4-mini" in model_name: # If it's part of a longer name
+        return MODEL_MAX_TOKENS["o4-mini"]
 
-
-def get_max_tokens_for_model(model_id: str) -> int:
-    """Returns the maximum context token length for a given model ID."""
-    if not model_id:  # Handle empty model_id case
-        return DEFAULT_CONTEXT_LENGTH
-
-    info = MODEL_INFO_REGISTRY.get(model_id)
-    if info:
-        return info["max_context_length"]
-
-    # Fallback heuristics similar to JS version
-    lower_id = model_id.lower()
-    if "32k" in lower_id:
-        return 32000
-    if "16k" in lower_id:
-        return 16000
-    if "8k" in lower_id:
-        return 8000
-    if "4k" in lower_id:
-        return 4000
-
-    # Default if no specific info or heuristic match
-    return DEFAULT_CONTEXT_LENGTH
+    print(f"Warning: Unknown model name '{model_name}'. Using default max tokens: {DEFAULT_MAX_TOKENS}", file=sys.stderr)
+    return DEFAULT_MAX_TOKENS

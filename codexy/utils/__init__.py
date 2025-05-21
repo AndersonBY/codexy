@@ -21,7 +21,7 @@ from .model_utils import (
     format_model_for_display,
 )
 
-from .model_info import get_max_tokens_for_model
+from .model_info import get_model_max_tokens # Corrected function name
 from .token_utils import approximate_tokens_used
 
 __all__ = [
@@ -42,6 +42,6 @@ __all__ = [
     "preload_models",
     "sort_models_for_display",
     "format_model_for_display",
-    "get_max_tokens_for_model",
+    "get_model_max_tokens", # Corrected function name
     "approximate_tokens_used",
 ]

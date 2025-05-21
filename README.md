@@ -236,6 +236,56 @@ safe_commands: # Commands safe to auto-approve in 'suggest' mode
 - Prefer f-strings for formatting.
 ```
 
+### Memory Compression
+
+To help manage the conversation history and prevent exceeding the model's context length limit, Codexy includes a memory compression feature. When enabled, it automatically compresses older parts of the conversation history.
+
+**How it Works:**
+
+*   The initial system prompt (from `instructions.md` or project docs) is always kept, if present.
+*   A configurable number of the most recent messages in the conversation are kept uncompressed.
+*   Messages between the initial system prompt and the recent messages are replaced with a single system notification indicating that a portion of the history has been summarized (e.g., `[System: X previous message(s) were summarized due to context length constraints.]`).
+
+**Configuration:**
+
+These settings are configured within the `memory` object in your `~/.codexy/config.json` or `~/.codexy/config.yaml` file.
+
+*   `enable_compression` (boolean):
+    *   Set to `true` to enable the memory compression feature.
+    *   Default: `false`.
+*   `compression_threshold_factor` (float):
+    *   A value between 0.0 and 1.0. Compression is triggered when the estimated token count of the current conversation history exceeds this factor multiplied by the model's maximum context window size.
+    *   For example, if the model's max tokens is 4096 and this factor is `0.8`, compression will be attempted when the history exceeds approximately 3277 tokens.
+    *   Default: `0.8`.
+*   `keep_recent_messages` (integer):
+    *   The number of most recent messages to always keep uncompressed at the end of the conversation.
+    *   Default: `5`.
+
+**Example `config.json`:**
+
+```json
+{
+  "model": "o4-mini",
+  "memory": {
+    "enable_compression": true,
+    "compression_threshold_factor": 0.75,
+    "keep_recent_messages": 10
+  }
+  // ... other settings
+}
+```
+
+**Example `config.yaml`:**
+
+```yaml
+model: o4-mini
+memory:
+  enable_compression: true
+  compression_threshold_factor: 0.75
+  keep_recent_messages: 10
+# ... other settings
+```
+
 ---
 
 ## Project Docs

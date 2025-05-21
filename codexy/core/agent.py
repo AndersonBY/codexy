@@ -33,8 +33,11 @@ from openai.types.chat.chat_completion_content_part_text_param import ChatComple
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
 
-from ..config import AppConfig, DEFAULT_FULL_STDOUT
+from ..config import AppConfig, DEFAULT_FULL_STDOUT, DEFAULT_MEMORY_ENABLE_COMPRESSION, DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR, DEFAULT_MEMORY_KEEP_RECENT_MESSAGES
 from ..tools import TOOL_REGISTRY, AVAILABLE_TOOL_DEFS
+from ..utils import get_model_max_tokens # Use the new centralized function
+from ..utils.token_utils import approximate_tokens_used
+
 
 # Constants for retry logic
 MAX_RETRIES = 5
@@ -94,6 +97,61 @@ class Agent:
         self.session_id: Optional[str] = None
         self.pending_tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
         self.last_response_id: Optional[str] = None  # Track the last response ID
+        self.compression_attempted_this_turn: bool = False
+
+    def _compress_history(self, max_tokens: int): # max_tokens is not directly used in this simple compression
+        memory_config = self.config.get("memory")
+        keep_recent_messages = DEFAULT_MEMORY_KEEP_RECENT_MESSAGES
+        if memory_config and memory_config.get("keep_recent_messages") is not None:
+            keep_recent_messages = memory_config["keep_recent_messages"]
+
+        if not self.history:
+            print("[Agent] History is empty, no compression needed.", file=sys.stderr)
+            return
+
+        new_history: List[ChatCompletionMessageParam] = []
+        compressible_history: List[ChatCompletionMessageParam] = list(self.history) # Make a mutable copy
+
+        # Preserve System Prompt
+        system_message_present = False
+        if compressible_history and compressible_history[0].get("role") == "system":
+            system_message = compressible_history.pop(0)
+            new_history.append(system_message)
+            system_message_present = True
+            print("[Agent] Preserved system message during compression.", file=sys.stderr)
+
+        # Handle Empty or Short History (considering if system message was popped)
+        # If only system message was present, len(compressible_history) is 0.
+        # If system + k messages, and k <= keep_recent_messages, no compression.
+        if len(compressible_history) <= keep_recent_messages:
+            print(f"[Agent] History length ({len(compressible_history)} non-system messages) is less than or equal to keep_recent_messages ({keep_recent_messages}). No compression needed.", file=sys.stderr)
+            # Add back the compressible part to new_history (which might contain system message)
+            new_history.extend(compressible_history)
+            self.history = new_history # In case system message was moved
+            return
+
+        # Identify messages to be summarized and messages to be kept
+        num_to_summarize = len(compressible_history) - keep_recent_messages
+        
+        # Messages to keep are the last 'keep_recent_messages'
+        messages_to_keep = compressible_history[-keep_recent_messages:]
+
+        if num_to_summarize > 0:
+            summary_message: ChatCompletionMessageParam = {
+                "role": "system", 
+                "content": f"[System: {num_to_summarize} previous message(s) were summarized due to context length constraints.]"
+            }
+            new_history.append(summary_message)
+            print(f"[Agent] Summarized {num_to_summarize} messages.", file=sys.stderr)
+        
+        new_history.extend(messages_to_keep)
+        
+        self.history = new_history
+        final_msg = f"[Agent] History compressed. New length: {len(self.history)}."
+        if num_to_summarize > 0:
+            final_msg += f" Summarized {num_to_summarize} messages."
+        print(final_msg, file=sys.stderr)
+
 
     def cancel(self):
         """Set the cancellation flag to interrupt the current Agent processing flow."""
@@ -232,6 +290,7 @@ class Agent:
         self._cancelled = False
         self._current_stream = None
         self.pending_tool_calls = None
+        self.compression_attempted_this_turn = False # Reset the flag
 
         if prompt:
             user_content: Union[str, Sequence[ChatCompletionContentPartParam]]
@@ -264,7 +323,45 @@ class Agent:
                     file=sys.stderr,
                 )
 
-        api_messages = self._prepare_messages()
+        # --- Context Length Check and Potential Compression ---
+        memory_config = self.config.get("memory")
+        enable_compression = DEFAULT_MEMORY_ENABLE_COMPRESSION
+        compression_threshold_factor = DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR
+        # keep_recent_messages is used by _compress_history, not directly here for the check
+
+        if memory_config:
+            enable_compression = memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION)
+            compression_threshold_factor = memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR)
+
+        if enable_compression:
+            model_name = self.config["model"]
+            model_max_tokens = get_model_max_tokens(model_name)
+            
+            # Prepare messages once to get an idea of their token count *before* system prompt
+            # This is a rough estimate as _prepare_messages adds system prompt later
+            # which also consumes tokens. A more accurate way would be to estimate tokens
+            # on the output of _prepare_messages, but that means calling it twice in worst case.
+            # For now, let's estimate based on raw history.
+            current_tokens = approximate_tokens_used(self.history) 
+            
+            trigger_threshold = int(model_max_tokens * compression_threshold_factor)
+
+            print(f"[Agent] Context check: current_tokens={current_tokens}, trigger_threshold={trigger_threshold}, model_max_tokens={model_max_tokens}", file=sys.stderr)
+
+            if current_tokens > trigger_threshold:
+                print(f"[Agent] Context length ({current_tokens}) nearing limit ({trigger_threshold}). Attempting to compress history...", file=sys.stderr)
+                self._compress_history(trigger_threshold) 
+                self.compression_attempted_this_turn = True # Set the flag
+                # History has potentially changed, so messages need to be re-prepared.
+                api_messages = self._prepare_messages()
+            else:
+                # History not compressed, prepare messages normally.
+                api_messages = self._prepare_messages()
+        else:
+            # Compression disabled, prepare messages normally.
+            api_messages = self._prepare_messages()
+        # --- End Context Length Check ---
+
         # print("DEBUG: Sending messages to API:", file=sys.stderr)
         # pprint.pprint(api_messages, stream=sys.stderr, indent=2)
         print(f"DEBUG: api_messages: {api_messages}", file=sys.stderr)
@@ -496,9 +593,14 @@ class Agent:
                         error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
                     )
                     if "context_length_exceeded" in error_detail or "maximum context length" in error_detail:
+                        error_content: str
+                        if self.compression_attempted_this_turn:
+                            error_content = "Error: Context length exceeded model's limit even after attempting history compression. Please clear history (/clear) or start a new session."
+                        else:
+                            error_content = "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
                         yield create_stream_event(
                             type="error",
-                            content="Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session.",
+                            content=error_content,
                         )
                         return
                     else:
