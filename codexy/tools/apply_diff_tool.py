@@ -16,9 +16,9 @@ def parse_diff_blocks(diff_text: str) -> list[tuple[int, str, str]]:
     pattern = re.compile(
         r"^\s*<<<<<<<\s*SEARCH\s*\n"  # Start marker
         r":start_line:(\d+)\s*\n"  # Capture start line number
-        r"-------\s*\n"  # Separator
+        r"-{2,}\s*\n"  # Separator (at least two hyphens)
         r"(.*?)"  # Capture search content (non-greedy)
-        r"=======\s*\n"  # Separator
+        r"={2,}\s*\n"  # Separator (at least two equals signs)
         r"(.*?)"  # Capture replace content (non-greedy)
         r">>>>>>>\s*REPLACE\s*$",  # End marker
         re.MULTILINE | re.DOTALL,  # Multiline and Dotall flags
@@ -163,7 +163,7 @@ APPLY_DIFF_TOOL_DEF: ChatCompletionToolParam = {
                 },
                 "diff": {
                     "type": "string",
-                    "description": "The diff string defining the changes. It must strictly follow the search/replace block format. Each block must be structured exactly as follows, using '\\n' for newlines:\n1. '<<<<<<< SEARCH\\n'\n2. ':start_line:NUMBER\\n' (where NUMBER is the 1-based starting line number in the original file)\n3. '-------\\n' (crucial separator)\n4. '[CONTENT_TO_FIND]\\n' (the exact content to be replaced)\n5. '=======\\n' (crucial separator)\n6. '[REPLACEMENT_CONTENT]\\n' (the new content to insert)\n7. '>>>>>>> REPLACE'\nMultiple such blocks can be concatenated in the diff string. Ensure '[CONTENT_TO_FIND]' precisely matches the existing file content, including leading/trailing whitespace on lines, for the change to be applied.",
+                    "description": "A string defining the changes. It MUST conform to this multi-line block format (use '\\n' for newlines):\n<<<<<<< SEARCH\\n:start_line:NUMBER\\n---...---\\nCONTENT_TO_FIND\\n===...===\\nREPLACEMENT_CONTENT\\n>>>>>>> REPLACE\n\nDetailed breakdown:\n1. '<<<<<<< SEARCH\\n'\n2. ':start_line:NUMBER\\n' (NUMBER is 1-based start line)\n3. A line of at least two hyphens, followed by a newline (e.g., '--\\n', '-------\\n').\n4. 'CONTENT_TO_FIND\\n' (The exact content to be replaced. Ensure it ends with a newline if the original content block ends with one.)\n5. A line of at least two equals signs, followed by a newline (e.g., '==\\n', '=======\\n').\n6. 'REPLACEMENT_CONTENT\\n' (The new content to insert. Ensure it ends with a newline if intended to be on its own line(s).)\n7. '>>>>>>> REPLACE'\nCONTENT_TO_FIND must precisely match existing file content. Multiple such blocks can be concatenated in the diff string.",
                 },
             },
             "required": ["path", "diff"],
