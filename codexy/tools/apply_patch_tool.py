@@ -109,9 +109,7 @@ def _parse_patch_text(patch_text: str) -> List[ParsedOperation]:
         elif line.strip() == END_OF_FILE_PREFIX.strip():
             if isinstance(current_op, (AddOp, UpdateOp)):
                 if isinstance(current_op, AddOp):
-                    current_op.content = "\n".join(
-                        line[1:] for line in line_buffer if line.startswith(HUNK_ADD_LINE_PREFIX)
-                    )
+                    current_op.content = "\n".join(line[1:] for line in line_buffer if line.startswith(HUNK_ADD_LINE_PREFIX))
                 elif isinstance(current_op, UpdateOp):
                     current_op.diff_hunk = "\n".join(line_buffer)
                 line_buffer = []
@@ -185,9 +183,7 @@ def _apply_diff_hunk(original_content: str, diff_hunk: str) -> str:
             hunk_idx += 1
         elif hunk_line.startswith(HUNK_DEL_LINE_PREFIX):
             if orig_idx >= len(orig_lines):
-                raise ToolError(
-                    f"Patch error: Trying to delete line {orig_idx + 1} but original only has {len(orig_lines)} lines. Hunk line: '{hunk_line.strip()}'"
-                )
+                raise ToolError(f"Patch error: Trying to delete line {orig_idx + 1} but original only has {len(orig_lines)} lines. Hunk line: '{hunk_line.strip()}'")
             # Verify context (optional but recommended for robustness)
             expected_deleted = hunk_line[1:]
             actual_original = orig_lines[orig_idx]
@@ -200,17 +196,13 @@ def _apply_diff_hunk(original_content: str, diff_hunk: str) -> str:
             hunk_idx += 1
         elif hunk_line.startswith(HUNK_CONTEXT_LINE_PREFIX):
             if orig_idx >= len(orig_lines):
-                raise ToolError(
-                    f"Patch error: Trying to match context line {orig_idx + 1} but original only has {len(orig_lines)} lines. Hunk line: '{hunk_line.strip()}'"
-                )
+                raise ToolError(f"Patch error: Trying to match context line {orig_idx + 1} but original only has {len(orig_lines)} lines. Hunk line: '{hunk_line.strip()}'")
             # Verify context
             expected_context = hunk_line[1:]
             actual_original = orig_lines[orig_idx]
             # Simple comparison
             if actual_original.rstrip("\r\n") != expected_context.rstrip("\r\n"):
-                raise ToolError(
-                    f"Patch mismatch: Context line {orig_idx + 1} differs. Expected:\n'{expected_context.strip()}'\nActual:\n'{actual_original.strip()}'"
-                )
+                raise ToolError(f"Patch mismatch: Context line {orig_idx + 1} differs. Expected:\n'{expected_context.strip()}'\nActual:\n'{actual_original.strip()}'")
             result_lines.append(actual_original)  # Add the original line
             orig_idx += 1
             hunk_idx += 1
@@ -218,9 +210,7 @@ def _apply_diff_hunk(original_content: str, diff_hunk: str) -> str:
             # Ignore potential empty last line often added by splitlines
             hunk_idx += 1
         else:
-            raise ToolError(
-                f"Invalid line prefix or unexpected content in diff hunk: '{hunk_line.strip()}' at hunk line index {hunk_idx}"
-            )
+            raise ToolError(f"Invalid line prefix or unexpected content in diff hunk: '{hunk_line.strip()}' at hunk line index {hunk_idx}")
 
     # Append any remaining lines from the original file
     result_lines.extend(orig_lines[orig_idx:])
@@ -246,9 +236,7 @@ def _resolve_and_check_path(relative_path: str, base_dir: Path = PROJECT_ROOT) -
 
     # Check if the resolved path is still within the project root directory
     if not str(target_path).startswith(str(base_dir.resolve()) + os.sep) and target_path != base_dir.resolve():
-        raise ToolError(
-            f"Attempted file access outside of project root: '{relative_path}' resolved to '{target_path}'"
-        )
+        raise ToolError(f"Attempted file access outside of project root: '{relative_path}' resolved to '{target_path}'")
 
     return target_path
 
@@ -354,7 +342,20 @@ APPLY_PATCH_TOOL_DEF: ChatCompletionToolParam = {
             "properties": {
                 "patch_text": {
                     "type": "string",
-                    "description": f"The patch content, starting with '{PATCH_PREFIX.strip()}' and ending with '{PATCH_SUFFIX.strip()}'. Contains commands like '{ADD_FILE_PREFIX}<path>', '{DELETE_FILE_PREFIX}<path>', '{UPDATE_FILE_PREFIX}<path>', optionally followed by '{MOVE_FILE_TO_PREFIX}<new_path>', and standard diff hunks (starting with '@@') for updates. It must end with '{END_OF_FILE_PREFIX.strip()}' before the final suffix.",
+                    "description": f"""The patch content, adhering to a specific format:
+1.  Must start with '{PATCH_PREFIX.strip()}'.
+2.  Must end with '{PATCH_SUFFIX.strip()}'.
+3.  Operations are defined by commands:
+    - '{ADD_FILE_PREFIX}<path>': Adds a new file. Content lines follow, each prefixed by '{HUNK_ADD_LINE_PREFIX}'.
+    - '{DELETE_FILE_PREFIX}<path>': Deletes a file. No content follows this command for the operation itself.
+    - '{UPDATE_FILE_PREFIX}<path>': Updates an existing file. May be followed by '{MOVE_FILE_TO_PREFIX}<new_path>'. The changes are described in a diff hunk.
+4.  Diff Hunks for Updates:
+    - Start with a header: '{HUNK_HEADER_PREFIX} -old_start[,old_count] +new_start[,new_count] {HUNK_HEADER_PREFIX}'.
+    - Followed by hunk lines:
+        - Lines to be added: Start with '{HUNK_ADD_LINE_PREFIX}'.
+        - Lines to be deleted: Start with '{HUNK_DEL_LINE_PREFIX}'.
+        - Context lines (unchanged): Start with '{HUNK_CONTEXT_LINE_PREFIX}' (a space).
+5.  For '{ADD_FILE_PREFIX}' and '{UPDATE_FILE_PREFIX}' operations, the content/hunk block MUST be terminated by '{END_OF_FILE_PREFIX.strip()}' on its own line before the next command or the final '{PATCH_SUFFIX.strip()}'.""",
                 },
             },
             "required": ["patch_text"],

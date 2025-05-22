@@ -163,7 +163,7 @@ APPLY_DIFF_TOOL_DEF: ChatCompletionToolParam = {
                 },
                 "diff": {
                     "type": "string",
-                    "description": "The diff block defining the changes, including start line numbers for each SEARCH block (e.g., '<<<<<<< SEARCH\\n:start_line:10\\n-------\\n[content_to_find]\\n=======\\n[replacement_content]\\n>>>>>>> REPLACE'). Use newline characters (\\n) for line breaks within the diff string.",
+                    "description": "The diff string defining the changes. It must strictly follow the search/replace block format. Each block must be structured exactly as follows, using '\\n' for newlines:\n1. '<<<<<<< SEARCH\\n'\n2. ':start_line:NUMBER\\n' (where NUMBER is the 1-based starting line number in the original file)\n3. '-------\\n' (crucial separator)\n4. '[CONTENT_TO_FIND]\\n' (the exact content to be replaced)\n5. '=======\\n' (crucial separator)\n6. '[REPLACEMENT_CONTENT]\\n' (the new content to insert)\n7. '>>>>>>> REPLACE'\nMultiple such blocks can be concatenated in the diff string. Ensure '[CONTENT_TO_FIND]' precisely matches the existing file content, including leading/trailing whitespace on lines, for the change to be applied.",
                 },
             },
             "required": ["path", "diff"],
