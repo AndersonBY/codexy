@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Optional, TypedDict, Union
 
 from rich.text import Text
@@ -109,9 +110,7 @@ class CommandReviewWidget(Static):
     class ReviewResult(Message):
         """Sent when the user makes an approval decision."""
 
-        def __init__(
-            self, approved: bool, tool_id: Optional[str], always_approve: bool = False, feedback: Optional[str] = None
-        ):
+        def __init__(self, approved: bool, tool_id: Optional[str], always_approve: bool = False, feedback: Optional[str] = None):
             self.approved = approved
             self.tool_id = tool_id
             self.always_approve = always_approve
@@ -224,14 +223,17 @@ class CommandReviewWidget(Static):
         radioset = self.query_one("#approval-options", RadioSet)
         radioset.remove_children()
 
-        options = [RadioButton("Yes (y)", id="yes", value=True)]
+        # Use a unique timestamp or counter to ensure unique IDs
+        unique_suffix = str(int(time.time() * 1000000) % 1000000)  # Use microseconds for uniqueness
+
+        options = [RadioButton("Yes (y)", id=f"yes_{unique_suffix}", value=True)]
         if self._approval_mode != ApprovalMode.SUGGEST and self._tool_name == "execute_command":
-            options.append(RadioButton("Yes, always approve this command for this session (a)", id="always"))
+            options.append(RadioButton("Yes, always approve this command for this session (a)", id=f"always_{unique_suffix}"))
         options.extend(
             [
-                RadioButton("Edit / Provide Feedback (e)", id="edit"),
-                RadioButton("No, continue generation (n)", id="no_continue"),
-                RadioButton("No, stop generation (ESC)", id="no_stop"),
+                RadioButton("Edit / Provide Feedback (e)", id=f"edit_{unique_suffix}"),
+                RadioButton("No, continue generation (n)", id=f"no_continue_{unique_suffix}"),
+                RadioButton("No, stop generation (ESC)", id=f"no_stop_{unique_suffix}"),
             ]
         )
 
@@ -300,17 +302,19 @@ class CommandReviewWidget(Static):
 
     def handle_decision(self, decision_id: str):
         """Handle user's decision (based on button ID)."""
-        if decision_id == "yes":
+        # Extract the base decision type by removing the unique suffix
+        if "_" in decision_id:
+            base_decision = decision_id.rsplit("_", 1)[0]
+        else:
+            base_decision = decision_id
+
+        if base_decision == "yes":
             self.post_message(self.ReviewResult(approved=True, tool_id=self._tool_id))
-        elif decision_id == "always":
+        elif base_decision == "always":
             self.post_message(self.ReviewResult(approved=True, tool_id=self._tool_id, always_approve=True))
-        elif decision_id == "edit":
+        elif base_decision == "edit":
             self.set_mode("input")
-        elif decision_id == "no_continue":
-            self.post_message(
-                self.ReviewResult(approved=False, tool_id=self._tool_id, feedback="Denied by user (continue).")
-            )
-        elif decision_id == "no_stop":
-            self.post_message(
-                self.ReviewResult(approved=False, tool_id=self._tool_id, feedback="Denied by user (stop).")
-            )
+        elif base_decision == "no_continue":
+            self.post_message(self.ReviewResult(approved=False, tool_id=self._tool_id, feedback="Denied by user (continue)."))
+        elif base_decision == "no_stop":
+            self.post_message(self.ReviewResult(approved=False, tool_id=self._tool_id, feedback="Denied by user (stop)."))

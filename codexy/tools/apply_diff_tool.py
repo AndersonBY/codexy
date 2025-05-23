@@ -163,7 +163,59 @@ APPLY_DIFF_TOOL_DEF: ChatCompletionToolParam = {
                 },
                 "diff": {
                     "type": "string",
-                    "description": "A string defining the changes. It MUST conform to this multi-line block format (use '\\n' for newlines):\n<<<<<<< SEARCH\\n:start_line:NUMBER\\n---...---\\nCONTENT_TO_FIND\\n===...===\\nREPLACEMENT_CONTENT\\n>>>>>>> REPLACE\n\nDetailed breakdown:\n1. '<<<<<<< SEARCH\\n'\n2. ':start_line:NUMBER\\n' (NUMBER is 1-based start line)\n3. A line of at least two hyphens, followed by a newline (e.g., '--\\n', '-------\\n').\n4. 'CONTENT_TO_FIND\\n' (The exact content to be replaced. Ensure it ends with a newline if the original content block ends with one.)\n5. A line of at least two equals signs, followed by a newline (e.g., '==\\n', '=======\\n').\n6. 'REPLACEMENT_CONTENT\\n' (The new content to insert. Ensure it ends with a newline if intended to be on its own line(s).)\n7. '>>>>>>> REPLACE'\nCONTENT_TO_FIND must precisely match existing file content. Multiple such blocks can be concatenated in the diff string.",
+                    "description": """A string defining the changes in SEARCH/REPLACE block format. 
+
+**EXACT FORMAT REQUIRED:**
+```
+<<<<<<< SEARCH
+:start_line:LINE_NUMBER
+-------
+EXACT_CONTENT_TO_FIND
+=======
+NEW_CONTENT_TO_REPLACE_WITH
+>>>>>>> REPLACE
+```
+
+**CRITICAL RULES:**
+1. Must start with `<<<<<<< SEARCH` (exactly 7 < symbols + space + SEARCH)
+2. Next line: `:start_line:NUMBER` where NUMBER is the 1-based line number where SEARCH content starts
+3. Separator: At least 2 hyphens `--` or more `-------` on their own line
+4. EXACT_CONTENT_TO_FIND: Must match the file content character-for-character (including whitespace)
+5. Separator: At least 2 equals `==` or more `=======` on their own line  
+6. NEW_CONTENT_TO_REPLACE_WITH: The replacement content
+7. Must end with `>>>>>>> REPLACE` (exactly 7 > symbols + space + REPLACE)
+
+**EXAMPLE - Single line change:**
+```
+<<<<<<< SEARCH
+:start_line:5
+-------
+import os
+=======
+import os
+from pathlib import Path
+>>>>>>> REPLACE
+```
+
+**EXAMPLE - Multi-line change:**
+```
+<<<<<<< SEARCH
+:start_line:10
+-------
+def old_function():
+    return "old"
+=======
+def new_function():
+    return "new"
+    # Added comment
+>>>>>>> REPLACE
+```
+
+**IMPORTANT NOTES:**
+- The SEARCH content must match the file EXACTLY (same indentation, spaces, etc.)
+- Line numbers are 1-based (first line = 1, not 0)
+- Multiple blocks can be concatenated in one diff string
+- Each block is processed independently""",
                 },
             },
             "required": ["path", "diff"],
