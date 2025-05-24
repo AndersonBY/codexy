@@ -48,10 +48,7 @@ excludes = ["tests"]
 dev = ["textual-dev", "pytest>=8.3.5", "pre-commit", "ruff"]
 
 [tool.ruff]
-# 设置行宽为 130 字符
 line-length = 130
-
-# 目标 Python 版本
 target-version = "py310"
 
 [tool.ruff.lint]
