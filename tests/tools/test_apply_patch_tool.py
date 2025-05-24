@@ -1587,3 +1587,201 @@ if __name__ == '__main__':
     print("✅ Real world pathlib conversion test passed!")
     print("✅ All structural changes applied correctly!")
     print("✅ No indentation issues detected!")
+
+
+# --- Patch Format Validation Tests (For Recently Fixed Bug) ---
+def test_malformed_patch_missing_at_markers_error(test_dir: Path):
+    """Test for the recently fixed bug: patch with diff lines but missing @@ markers."""
+    file_to_update = test_dir / "download_models.py"
+    original_content = """import json
+import os
+
+def download_function():
+    if os.path.exists(filename):
+        return True
+    return False
+"""
+    file_to_update.write_text(original_content, encoding="utf-8")
+
+    # Malformed patch - has diff lines but no @@ markers
+    malformed_patch = """*** Begin Patch
+*** Update File: download_models.py
+import json
+- import os
++ from pathlib import Path
+
+def download_function():
+-    if os.path.exists(filename):
++    if Path(filename).exists():
+        return True
+    return False
+*** End Patch"""
+
+    result = apply_patch(malformed_patch)
+
+    # Should detect the error
+    assert "Error" in result
+    assert "@@ markers" in result
+    assert "Found diff lines" in result
+    assert "missing required" in result
+
+    # File should NOT be modified
+    final_content = file_to_update.read_text(encoding="utf-8")
+    assert final_content == original_content
+
+
+def test_user_exact_malformed_patch_format(test_dir: Path):
+    """Test using the exact malformed patch format provided by the user."""
+    file_to_update = test_dir / "download_models.py"
+
+    # User's original file content
+    original_content = """import json
+import os
+import requests
+
+def download_and_modify_json(url, local_filename, modifications):
+    if os.path.exists(local_filename):
+        data = json.load(open(local_filename))
+    else:
+        data = {}
+
+    with open(local_filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+"""
+    file_to_update.write_text(original_content, encoding="utf-8")
+
+    # User's malformed patch (missing @@ markers)
+    user_malformed_patch = """*** Begin Patch
+*** Update File: download_models.py
+import json
+- import os
++ from pathlib import Path
+import requests
+
+def download_and_modify_json(url, local_filename, modifications):
+-    if os.path.exists(local_filename):
++    local_path = Path(local_filename)
++    if local_path.exists():
+-        data = json.load(open(local_filename))
++        data = json.load(local_path.open('r', encoding='utf-8'))
+    else:
+        data = {}
+
+-    with open(local_filename, 'w', encoding='utf-8') as f:
+-        json.dump(data, f, ensure_ascii=False, indent=4)
++    with local_path.open('w', encoding='utf-8') as f:
++        json.dump(data, f, ensure_ascii=False, indent=4)
+*** End Patch"""
+
+    result = apply_patch(user_malformed_patch)
+
+    # Should return error about missing @@ markers
+    assert "Error" in result
+    assert "Invalid patch format" in result
+    assert "@@ markers" in result
+
+    # File should not be modified
+    final_content = file_to_update.read_text(encoding="utf-8")
+    assert final_content == original_content
+    assert "import os" in final_content
+    assert "from pathlib import Path" not in final_content
+
+
+def test_correct_patch_format_still_works(test_dir: Path):
+    """Verify that the fix doesn't break correct patch formats."""
+    file_to_update = test_dir / "download_models.py"
+    original_content = """import json
+import os
+
+def download_function():
+    if os.path.exists(filename):
+        return True
+    return False
+"""
+    file_to_update.write_text(original_content, encoding="utf-8")
+
+    # Correct enhanced format - should work
+    correct_patch = """*** Begin Patch
+*** Update File: download_models.py
+@@
+-import os
++from pathlib import Path
+@@
+-    if os.path.exists(filename):
++    if Path(filename).exists():
+*** End Patch"""
+
+    result = apply_patch(correct_patch)
+
+    # Should succeed
+    assert "Updated file: download_models.py" in result
+    assert "Error" not in result
+
+    # Verify changes were applied
+    final_content = file_to_update.read_text(encoding="utf-8")
+    assert "from pathlib import Path" in final_content
+    assert "import os" not in final_content
+    assert "Path(filename).exists()" in final_content
+
+
+def test_mixed_format_validation_error():
+    """Test edge cases of patch format validation."""
+    # Empty patch with only diff lines
+    only_diff_lines = """*** Begin Patch
+*** Update File: test.py
+- old_line
++ new_line
+*** End Patch"""
+
+    result = apply_patch(only_diff_lines)
+    assert "Error" in result
+    assert "@@ markers" in result
+
+
+def test_format_validation_backwards_compatibility():
+    """Ensure backwards compatibility with traditional unified diff format."""
+    # Traditional unified diff format - should still work
+    traditional_patch = """*** Begin Patch
+*** Update File: test.py
+@@ -1,3 +1,3 @@
+ import json
+-import os
++from pathlib import Path
+
+*** End of File
+*** End Patch"""
+
+    # Should not trigger the validation error since it has proper @@ headers
+    try:
+        from codexy.tools.apply_patch_tool import _parse_patch_text
+
+        operations = _parse_patch_text(traditional_patch)
+        # Should parse without error
+        assert len(operations) == 1
+        assert operations[0].type == "update"
+    except Exception as e:
+        if "File to update not found" in str(e):
+            pass  # Expected when file doesn't exist
+        else:
+            raise AssertionError(f"Traditional format should not be rejected: {e}") from e
+
+
+def test_patch_format_bug_fix_summary():
+    """Summary test documenting the bug fix for patch format validation."""
+    malformed_patch = """*** Begin Patch
+*** Update File: nonexistent.py
+- old_code
++ new_code
+*** End Patch"""
+
+    result = apply_patch(malformed_patch)
+
+    # All conditions should be met for proper error reporting
+    success_conditions = [
+        "Error" in result,
+        "Invalid patch format" in result,
+        "@@ markers" in result,
+        "Found diff lines" in result,
+    ]
+
+    assert all(success_conditions), f"Bug fix verification failed: {result}"

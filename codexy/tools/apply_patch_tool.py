@@ -516,6 +516,20 @@ def _finalize_operation(current_op: ParsedOperation, line_buffer: list[str]) -> 
     elif isinstance(current_op, UpdateOp):
         # For UPDATE operations, parse the enhanced patch format
         context_lines, chunks, _, is_eof = parse_enhanced_patch_section(line_buffer, 0)
+
+        # Check if parsing failed to produce any chunks from non-empty buffer
+        if line_buffer and not chunks:
+            # Check if the buffer contains potential diff content (- or + lines)
+            has_diff_lines = any(line.startswith("-") or line.startswith("+") for line in line_buffer)
+            if has_diff_lines:
+                # This suggests malformed patch format - user has diff content but no proper @@ markers
+                raise ToolError(
+                    f"Invalid patch format for file '{current_op.path}': "
+                    f"Found diff lines (starting with - or +) but missing required @@ markers. "
+                    f"Each diff block must be preceded by either '@@' or '@@ -line,count +line,count @@'. "
+                    f"Found lines: {line_buffer[:3]}{'...' if len(line_buffer) > 3 else ''}"
+                )
+
         current_op.chunks.extend(chunks)
 
 
