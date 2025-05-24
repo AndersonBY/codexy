@@ -3,9 +3,8 @@ Security Check Module - Responsible for Checking File and Directory Security
 """
 
 import re
-from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Set, Dict
+from pathlib import Path
 
 from detect_secrets.core.secrets_collection import SecretsCollection
 from detect_secrets.settings import default_settings
@@ -21,7 +20,7 @@ class SuspiciousFileResult:
     """
 
     file_path: str  # Keep as string for serialization compatibility
-    messages: List[str]
+    messages: list[str]
 
 
 class SecurityChecker:
@@ -67,21 +66,17 @@ class SecurityChecker:
 
     def __init__(self):
         """Initialize security checker"""
-        self.suspicious_file_patterns = [
-            re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_FILE_PATTERNS
-        ]
-        self.suspicious_content_patterns = [
-            re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_CONTENT_PATTERNS
-        ]
-        self.checked_paths: Set[str] = set()
+        self.suspicious_file_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_FILE_PATTERNS]
+        self.suspicious_content_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_CONTENT_PATTERNS]
+        self.checked_paths: set[str] = set()
 
-    def check_line(self, line: str) -> List[str]:
+    def check_line(self, line: str) -> list[str]:
         """Check security of a single line
 
         Args:
             line: Line content
         """
-        messages: List[str] = []
+        messages: list[str] = []
         for pattern in self.suspicious_content_patterns:
             matches = pattern.finditer(line)
             for match in matches:
@@ -90,7 +85,7 @@ class SecurityChecker:
 
         return messages
 
-    def check_file(self, file_path: Path, content: str) -> List[str]:
+    def check_file(self, file_path: Path, content: str) -> list[str]:
         """Check security of a single file
 
         Args:
@@ -105,7 +100,7 @@ class SecurityChecker:
             return []
 
         self.checked_paths.add(str_path)
-        messages: List[str] = []
+        messages: list[str] = []
 
         # Check file name
         for pattern in self.suspicious_file_patterns:
@@ -124,7 +119,7 @@ class SecurityChecker:
 
         return messages
 
-    def check_file_size(self, file_path: Path, max_size_mb: float = 10.0) -> List[str]:
+    def check_file_size(self, file_path: Path, max_size_mb: float = 10.0) -> list[str]:
         """Check file size
 
         Args:
@@ -143,7 +138,7 @@ class SecurityChecker:
 
         return []
 
-    def check_files_with_secretlint(self, file_path: Path) -> List[str]:
+    def check_files_with_secretlint(self, file_path: Path) -> list[str]:
         secrets = SecretsCollection()
         with default_settings():
             secrets.scan_file(filename=str(file_path.absolute()))
@@ -154,9 +149,7 @@ class SecurityChecker:
             return results
 
 
-def check_files(
-    root_dir: str | Path, file_paths: List[str], file_contents: Dict[str, str]
-) -> List[SuspiciousFileResult]:
+def check_files(root_dir: str | Path, file_paths: list[str], file_contents: dict[str, str]) -> list[SuspiciousFileResult]:
     """Check security of multiple files
 
     Args:
@@ -168,7 +161,7 @@ def check_files(
         List of suspicious file results
     """
     checker = SecurityChecker()
-    results: List[SuspiciousFileResult] = []
+    results: list[SuspiciousFileResult] = []
     root_path = Path(root_dir)
 
     for file_path in file_paths:

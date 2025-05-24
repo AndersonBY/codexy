@@ -1,40 +1,39 @@
-# -*- coding: utf-8 -*-
-
 """Core agent logic for interacting with OpenAI API."""
 
+import asyncio
+import inspect
+import json
 import os
 import sys
-import json
-import uuid
-import inspect
-import asyncio
 import traceback
+import uuid
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
-from typing import List, Dict, Set, Any, Optional, TypedDict, Union, cast, Sequence, AsyncIterator
+from typing import Any, TypedDict, cast
 
 from openai import (
-    AsyncOpenAI,
     APIConnectionError,
-    RateLimitError,
+    APIError,
     APIStatusError,
     APITimeoutError,
-    APIError,
+    AsyncOpenAI,
     BadRequestError,
+    RateLimitError,
 )
 from openai._types import NOT_GIVEN
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
-    ChatCompletionUserMessageParam,
     ChatCompletionToolMessageParam,
+    ChatCompletionToolParam,
+    ChatCompletionUserMessageParam,
 )
 from openai.types.chat.chat_completion_content_part_param import ChatCompletionContentPartParam
 from openai.types.chat.chat_completion_content_part_text_param import ChatCompletionContentPartTextParam
-from openai.types.chat import ChatCompletionToolParam
 from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
 
-from ..config import AppConfig, DEFAULT_FULL_STDOUT
-from ..tools import TOOL_REGISTRY, AVAILABLE_TOOL_DEFS
+from ..config import DEFAULT_FULL_STDOUT, AppConfig
+from ..tools import AVAILABLE_TOOL_DEFS, TOOL_REGISTRY
 
 # Constants for retry logic
 MAX_RETRIES = 5
@@ -44,19 +43,19 @@ MAX_RETRY_DELAY_SECONDS = 30.0  # Maximum delay between retries
 
 class StreamEvent(TypedDict):
     type: str
-    content: Optional[str]
-    tool_call_id: Optional[str]
-    tool_function_name: Optional[str]
+    content: str | None
+    tool_call_id: str | None
+    tool_function_name: str | None
     # Reverted: Use tool_arguments_delta as the key name expected by the TUI
-    tool_arguments_delta: Optional[str]
+    tool_arguments_delta: str | None
 
 
 def create_stream_event(
     type: str,
-    content: Optional[str] = None,
-    tool_call_id: Optional[str] = None,
-    tool_function_name: Optional[str] = None,
-    tool_arguments_delta: Optional[str] = None,  # Use delta here
+    content: str | None = None,
+    tool_call_id: str | None = None,
+    tool_function_name: str | None = None,
+    tool_arguments_delta: str | None = None,  # Use delta here
 ) -> StreamEvent:
     return {
         "type": type,
@@ -87,13 +86,13 @@ class Agent:
             timeout=config.get("timeout") or float(os.environ.get("OPENAI_TIMEOUT_MS", 60000)) / 1000.0,
             max_retries=0,  # Disable automatic retries in the client, we handle it manually
         )
-        self.history: List[ChatCompletionMessageParam] = []
-        self.available_tools: List[ChatCompletionToolParam] = AVAILABLE_TOOL_DEFS
+        self.history: list[ChatCompletionMessageParam] = []
+        self.available_tools: list[ChatCompletionToolParam] = AVAILABLE_TOOL_DEFS
         self._cancelled: bool = False
         self._current_stream = None
-        self.session_id: Optional[str] = None
-        self.pending_tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
-        self.last_response_id: Optional[str] = None  # Track the last response ID
+        self.session_id: str | None = None
+        self.pending_tool_calls: list[ChatCompletionMessageToolCall] | None = None
+        self.last_response_id: str | None = None  # Track the last response ID
 
     def cancel(self):
         """Set the cancellation flag to interrupt the current Agent processing flow."""
@@ -108,9 +107,9 @@ class Agent:
         self.last_response_id = None  # Clear last response ID too
         print("[Agent] In-memory conversation history cleared.", file=sys.stderr)
 
-    def _prepare_messages(self) -> List[ChatCompletionMessageParam]:
+    def _prepare_messages(self) -> list[ChatCompletionMessageParam]:
         """Prepares the message history for the API call, including system prompt."""
-        api_messages: List[ChatCompletionMessageParam] = []
+        api_messages: list[ChatCompletionMessageParam] = []
         system_prompt = self.config.get("instructions")
         if system_prompt:
             # Ensure only one system message at the beginning
@@ -150,7 +149,7 @@ class Agent:
         self,
         tool_call: ChatCompletionMessageToolCall,
         is_sandboxed: bool = False,
-        allowed_write_paths: Optional[List[Path]] = None,
+        allowed_write_paths: list[Path] | None = None,
     ) -> str:
         """
         Internal implementation to execute a tool call.
@@ -223,7 +222,7 @@ class Agent:
             return f"Error during execution of tool '{function_name}': {e}\n\nTraceback:\n{formatted_traceback}"
 
     async def process_turn_stream(
-        self, prompt: Optional[str] = None, image_paths: Optional[List[str]] = None
+        self, prompt: str | None = None, image_paths: list[str] | None = None
     ) -> AsyncIterator[StreamEvent]:
         """
         Processes one turn of interaction with streaming.
@@ -234,7 +233,7 @@ class Agent:
         self.pending_tool_calls = None
 
         if prompt:
-            user_content: Union[str, Sequence[ChatCompletionContentPartParam]]
+            user_content: str | Sequence[ChatCompletionContentPartParam]
             if image_paths:
                 print("Warning: Image input processing is not fully implemented yet.", file=sys.stderr)
                 text_part: ChatCompletionContentPartTextParam = {"type": "text", "text": prompt}
@@ -291,13 +290,13 @@ class Agent:
                 self._current_stream = stream
                 print("[Agent] Stream connection established.", file=sys.stderr)
 
-                assistant_message_accumulator: Dict[str, Any] = {
+                assistant_message_accumulator: dict[str, Any] = {
                     "role": "assistant",
                     "content": None,
                     "tool_calls": [],
                 }
-                started_tool_call_indices: Set[int] = set()
-                tool_arguments_complete: Dict[int, str] = {}
+                started_tool_call_indices: set[int] = set()
+                tool_arguments_complete: dict[int, str] = {}
                 next_tool_index = 0  # Counter for assigning index if missing
 
                 async for chunk in stream:
@@ -380,14 +379,10 @@ class Agent:
                                     )
 
                                 # Handle arguments
-                                if (
-                                    tool_call_chunk.function and tool_call_chunk.function.arguments is not None
-                                ):  # Check for None
+                                if tool_call_chunk.function and tool_call_chunk.function.arguments is not None:  # Check for None
                                     args_chunk = tool_call_chunk.function.arguments
                                     # Accumulate/store complete arguments
-                                    tool_arguments_complete[index] = (
-                                        tool_arguments_complete.get(index, "") + args_chunk
-                                    )
+                                    tool_arguments_complete[index] = tool_arguments_complete.get(index, "") + args_chunk
                                     # Update the main accumulator immediately
                                     current_call_entry["function"]["arguments"] = tool_arguments_complete[index]
 
@@ -410,7 +405,7 @@ class Agent:
                     return
 
                 # <<< CONSOLIDATED FINALIZATION of Tool Calls >>>
-                final_tool_calls_for_history: List[ChatCompletionMessageToolCall] = []
+                final_tool_calls_for_history: list[ChatCompletionMessageToolCall] = []
                 if isinstance(assistant_message_accumulator.get("tool_calls"), list):
                     for index, tool_call_data in enumerate(assistant_message_accumulator["tool_calls"]):
                         # Use assigned ID and check for name
@@ -419,9 +414,7 @@ class Agent:
 
                         if final_id and final_name:
                             # Use the potentially complete arguments buffer
-                            final_args = tool_arguments_complete.get(
-                                index, tool_call_data["function"].get("arguments", "")
-                            )
+                            final_args = tool_arguments_complete.get(index, tool_call_data["function"].get("arguments", ""))
                             # Ensure final args are stored in the accumulator entry
                             tool_call_data["function"]["arguments"] = final_args
                             if not isinstance(final_args, str):
@@ -446,7 +439,7 @@ class Agent:
                             )
 
                 # <<< Assemble final message for history >>>
-                final_assistant_msg_dict: Dict[str, Any] = {"role": "assistant"}
+                final_assistant_msg_dict: dict[str, Any] = {"role": "assistant"}
                 content = assistant_message_accumulator.get("content")
                 if content:
                     final_assistant_msg_dict["content"] = content
@@ -486,15 +479,13 @@ class Agent:
                 print(f"[Agent] Attempt {attempt + 1} failed: {error_msg}", file=sys.stderr)
                 status_code = getattr(e, "status_code", None)
                 should_retry = (
-                    isinstance(e, (APITimeoutError, APIConnectionError))
+                    isinstance(e, APITimeoutError | APIConnectionError)
                     or isinstance(e, RateLimitError)
                     or (isinstance(e, APIStatusError) and status_code and status_code >= 500)
                 ) and attempt < MAX_RETRIES - 1
                 if isinstance(e, BadRequestError) and status_code == 400:
                     error_body = getattr(e, "body", {})
-                    error_detail = (
-                        error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
-                    )
+                    error_detail = error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
                     if "context_length_exceeded" in error_detail or "maximum context length" in error_detail:
                         yield create_stream_event(
                             type="error",
@@ -532,14 +523,10 @@ class Agent:
                 print(f"[Agent] Attempt {attempt + 1} failed: An unexpected error occurred: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 if attempt == MAX_RETRIES - 1:
-                    yield create_stream_event(
-                        type="error", content=f"Error: Max retries reached. Unexpected error: {e}"
-                    )
+                    yield create_stream_event(type="error", content=f"Error: Max retries reached. Unexpected error: {e}")
                     return
                 if attempt < 1:
-                    print(
-                        f"[Agent] Retrying unexpected error in {current_retry_delay:.2f} seconds...", file=sys.stderr
-                    )
+                    print(f"[Agent] Retrying unexpected error in {current_retry_delay:.2f} seconds...", file=sys.stderr)
                     await asyncio.sleep(current_retry_delay)
                     current_retry_delay = min(current_retry_delay * 2, MAX_RETRY_DELAY_SECONDS)
                     continue
@@ -554,7 +541,7 @@ class Agent:
         self._current_stream = None
 
     async def continue_with_tool_results_stream(
-        self, tool_results: List[ChatCompletionToolMessageParam]
+        self, tool_results: list[ChatCompletionToolMessageParam]
     ) -> AsyncIterator[StreamEvent]:
         """
         Adds tool results to history and yields subsequent stream events from the API.

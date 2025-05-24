@@ -1,16 +1,12 @@
-# -*- coding: utf-8 -*-
-from typing import List, Optional
-
 from rich.text import Text
-
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Static, ListView, ListItem, Label
+from textual.widgets import Label, ListItem, ListView, Static
 
-from ....utils.model_utils import sort_models_for_display, format_model_for_display
+from ....utils.model_utils import format_model_for_display, sort_models_for_display
 
 
 # Type for list items carrying the model ID
@@ -80,7 +76,7 @@ class ModelOverlay(Static):
     """
 
     # --- Reactives ---
-    available_models: reactive[List[str]] = reactive(list)
+    available_models: reactive[list[str]] = reactive(list)
     current_model: reactive[str] = reactive("")
     can_switch: reactive[bool] = reactive(True)  # Controls if switching is allowed
 
@@ -123,7 +119,7 @@ class ModelOverlay(Static):
         self.query_one("#model-overlay-error").set_class(not can_switch, "-active")
         self.query_one("#model-overlay-error").display = not can_switch  # Ensure it's visible
 
-    def watch_available_models(self, new_models: List[str]) -> None:
+    def watch_available_models(self, new_models: list[str]) -> None:
         """Update the list view when available models change."""
         self._populate_list()
 
@@ -143,7 +139,7 @@ class ModelOverlay(Static):
             return  # Don't populate if switching isn't allowed
 
         sorted_list = sort_models_for_display(self.available_models, self.current_model)
-        highlighted_index: Optional[int] = None
+        highlighted_index: int | None = None
 
         for index, model_id in enumerate(sorted_list):
             display_text = format_model_for_display(model_id, self.current_model)

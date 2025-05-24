@@ -1,6 +1,5 @@
 import fnmatch
 from pathlib import Path
-from typing import Optional, List
 
 from openai.types.chat import ChatCompletionToolParam
 
@@ -9,7 +8,7 @@ from openai.types.chat import ChatCompletionToolParam
 PROJECT_ROOT = Path.cwd()
 
 
-def read_file_tool(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
+def read_file_tool(path: str, start_line: int | None = None, end_line: int | None = None) -> str:
     """Reads content from a file, potentially a specific line range."""
     if not path:
         return "Error: 'path' argument is required."
@@ -31,7 +30,7 @@ def read_file_tool(path: str, start_line: Optional[int] = None, end_line: Option
         return f"Error: Path '{path}' is not a file."
 
     try:
-        with open(resolved_path, "r", encoding="utf-8") as f:
+        with open(resolved_path, encoding="utf-8") as f:
             if start_line is not None or end_line is not None:
                 lines = f.readlines()
                 start_idx = (start_line - 1) if start_line is not None and start_line > 0 else 0
@@ -90,7 +89,9 @@ def write_to_file_tool(path: str, content: str, line_count: int) -> str:
     actual_lines = len(content.splitlines())
     # Allow some flexibility (e.g., trailing newline might differ)
     if abs(actual_lines - line_count) > 1:
-        print(f"Warning: Provided line_count ({line_count}) does not match actual lines ({actual_lines}) for path '{path}'. Proceeding anyway.")
+        print(
+            f"Warning: Provided line_count ({line_count}) does not match actual lines ({actual_lines}) for path '{path}'. Proceeding anyway."
+        )
         # Could return an error here if strict matching is desired:
         # return f"Error: Provided line_count ({line_count}) does not match actual lines ({actual_lines})."
 
@@ -106,7 +107,7 @@ def write_to_file_tool(path: str, content: str, line_count: int) -> str:
         return f"Error writing to file '{path}': {e}"
 
 
-def _should_ignore_path(path: str, ignore_patterns: List[str], current_dir: Optional[Path] = None) -> bool:
+def _should_ignore_path(path: str, ignore_patterns: list[str], current_dir: Path | None = None) -> bool:
     """Check if the path should be ignored
 
     Args:
@@ -172,9 +173,9 @@ def _should_ignore_path(path: str, ignore_patterns: List[str], current_dir: Opti
     return False
 
 
-def collect_gitignore_patterns(directory_path: Path) -> List[str]:
+def collect_gitignore_patterns(directory_path: Path) -> list[str]:
     """Collect .gitignore rules from the specified directory and all its parent directories."""
-    patterns: List[str] = []
+    patterns: list[str] = []
 
     # Start from the current directory and collect all parent directory's .gitignore rules
     current_dir = directory_path
@@ -183,7 +184,7 @@ def collect_gitignore_patterns(directory_path: Path) -> List[str]:
 
         if gitignore_path.exists():
             try:
-                with open(gitignore_path, "r", encoding="utf-8") as f:
+                with open(gitignore_path, encoding="utf-8") as f:
                     lines = f.readlines()
                     dir_patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
                     patterns.extend(dir_patterns)
@@ -207,7 +208,9 @@ def collect_gitignore_patterns(directory_path: Path) -> List[str]:
     return patterns
 
 
-def _recursive_list_files(current_path: Path, root_path: Path, parent_ignore_patterns: List[str], use_gitignore: bool, entries: List[str]) -> None:
+def _recursive_list_files(
+    current_path: Path, root_path: Path, parent_ignore_patterns: list[str], use_gitignore: bool, entries: list[str]
+) -> None:
     """Recursively traverse directories, checking if they should be ignored before processing."""
 
     # Check if this directory itself should be ignored (using parent directory's ignore rules)
@@ -226,7 +229,7 @@ def _recursive_list_files(current_path: Path, root_path: Path, parent_ignore_pat
         gitignore_path = current_path / ".gitignore"
         if gitignore_path.exists():
             try:
-                with open(gitignore_path, "r", encoding="utf-8") as f:
+                with open(gitignore_path, encoding="utf-8") as f:
                     lines = f.readlines()
                     local_patterns = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
                     current_ignore_patterns.extend(local_patterns)
@@ -307,7 +310,7 @@ def list_files_tool(path: str, recursive: bool = False, use_gitignore: bool = Tr
         return f"Error: Path '{display_path}' is not a valid directory."
 
     # Get gitignore patterns if needed - 使用新的父目录收集函数
-    ignore_patterns: List[str] = []
+    ignore_patterns: list[str] = []
     if use_gitignore:
         ignore_patterns = collect_gitignore_patterns(target_path)
 

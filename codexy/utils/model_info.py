@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
-
 """Stores information about supported models, like context length."""
 
-from typing import TypedDict, Dict
+from typing import TypedDict
 
 
 # Define the structure for model information
@@ -14,7 +12,7 @@ class ModelInfo(TypedDict):
 # Dictionary mapping model IDs to their information
 # Based on codex-cli/src/utils/model-info.ts, but simplified for common models
 # We estimate context length in tokens.
-MODEL_INFO_REGISTRY: Dict[str, ModelInfo] = {
+MODEL_INFO_REGISTRY: dict[str, ModelInfo] = {
     "o1-pro-2025-03-19": {"label": "o1 Pro (2025-03-19)", "max_context_length": 200000},
     "o3": {"label": "o3", "max_context_length": 200000},
     "o3-2025-04-16": {"label": "o3 (2025-04-16)", "max_context_length": 200000},

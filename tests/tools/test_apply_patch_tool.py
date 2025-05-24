@@ -1,9 +1,10 @@
 import os
-import pytest
 from pathlib import Path
 
-from codexy.tools.apply_patch_tool import apply_patch, ToolError
+import pytest
+
 import codexy.tools.apply_patch_tool as patch_tool_module
+from codexy.tools.apply_patch_tool import ToolError, apply_patch
 
 # --- Helper Functions for Indentation Analysis ---
 
@@ -620,13 +621,13 @@ def test_update_with_context_markers(test_dir: Path):
     original_content = """class WebServer:
     def __init__(self):
         self.port = 8080
-    
+
     def start(self):
         print("Starting web server...")
         self.bind_port()
         self.listen_https()
         print("Server started successfully")
-    
+
     def stop(self):
         print("Stopping server")
 """
@@ -1029,7 +1030,7 @@ def test_debug_chunk_parsing(test_dir: Path):
     print(f"Patch: {repr(patch)}")
 
     # Import the parsing functions to debug
-    from codexy.tools.apply_patch_tool import _parse_patch_text, parse_enhanced_patch_section, UpdateOp
+    from codexy.tools.apply_patch_tool import UpdateOp, _parse_patch_text, parse_enhanced_patch_section
 
     # Parse the patch
     operations = _parse_patch_text(patch)
@@ -1077,14 +1078,14 @@ def download_model():
         data = json.load(Path(local_filename).open('r', encoding='utf-8'))
     else:
         data = {}
-    
+
     with Path(local_filename).open('w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-    
+
     model_dir = Path(model_dir) / 'models'
     home_dir = Path.home()
     config_file = home_dir / config_file_name
-    
+
     json_mods = {
         'models-dir': str(model_dir),
         'layoutreader-model-dir': str(layoutreader_model_dir),
@@ -1143,7 +1144,14 @@ def download_model():
             not inside_function_or_class
             and line.startswith("    ")
             and line.strip()
-            and ("if Path(" in line or "with Path(" in line or "model_dir =" in line or "home_dir =" in line or "config_file =" in line or "json_mods =" in line)
+            and (
+                "if Path(" in line
+                or "with Path(" in line
+                or "model_dir =" in line
+                or "home_dir =" in line
+                or "config_file =" in line
+                or "json_mods =" in line
+            )
         ):
             problematic_lines.append(f"Line {i + 1}: {repr(line)}")
 
@@ -1154,7 +1162,7 @@ def download_model():
 
         print("\n💥 BUG REPRODUCED: The apply_patch tool incorrectly indented top-level code!")
         print("⚠️  This test documents a real bug that needs to be fixed.")
-        assert False, f"apply_patch tool created {len(problematic_lines)} incorrectly indented lines"
+        raise AssertionError(f"apply_patch tool created {len(problematic_lines)} incorrectly indented lines")
     else:
         print("✅ No indentation problems found - patch applied correctly!")
 
@@ -1231,14 +1239,14 @@ json_mods = {
                 # This line itself should not be indented (it's the block starter)
                 if line.startswith("    ") and not line.strip().startswith("#"):
                     print(f"ERROR: Top-level block statement incorrectly indented at line {i + 1}: {repr(line)}")
-                    assert False, f"Top-level block statement should not be indented: {repr(line)}"
+                    raise AssertionError(f"Top-level block statement should not be indented: {repr(line)}")
             elif stripped.endswith("{") or stripped.endswith("["):
                 # Dictionary or list start - also creates a block
                 inside_block = True
                 # This line itself should not be indented (it's the block starter)
                 if line.startswith("    ") and not line.strip().startswith("#"):
                     print(f"ERROR: Top-level block statement incorrectly indented at line {i + 1}: {repr(line)}")
-                    assert False, f"Top-level block statement should not be indented: {repr(line)}"
+                    raise AssertionError(f"Top-level block statement should not be indented: {repr(line)}")
             elif inside_block and line.startswith("    "):
                 # This is inside a block, indentation is expected
                 continue
@@ -1248,18 +1256,18 @@ json_mods = {
                 # This line should not be indented if it's just the closing brace/bracket
                 if line.startswith("    ") and stripped in ["}", "]"]:
                     print(f"ERROR: Top-level closing brace/bracket incorrectly indented at line {i + 1}: {repr(line)}")
-                    assert False, f"Top-level closing brace/bracket should not be indented: {repr(line)}"
+                    raise AssertionError(f"Top-level closing brace/bracket should not be indented: {repr(line)}")
             elif inside_block and not line.startswith("    ") and line.strip():
                 # We've exited the block
                 inside_block = False
                 # This line should not be indented
                 if line.startswith("    ") and not line.strip().startswith("#"):
                     print(f"ERROR: Top-level code incorrectly indented at line {i + 1}: {repr(line)}")
-                    assert False, f"Top-level code should not be indented: {repr(line)}"
+                    raise AssertionError(f"Top-level code should not be indented: {repr(line)}")
             elif not inside_block and line.startswith("    ") and line.strip() and not line.strip().startswith("#"):
                 # This is top-level code that shouldn't be indented
                 print(f"ERROR: Top-level code incorrectly indented at line {i + 1}: {repr(line)}")
-                assert False, f"Top-level code should not be indented: {repr(line)}"
+                raise AssertionError(f"Top-level code should not be indented: {repr(line)}")
 
     print("✅ Import modification indentation test passed!")
 
@@ -1277,14 +1285,14 @@ def download_model():
         data = json.load(open(local_filename))
     else:
         data = {}
-    
+
     with open(local_filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-    
+
     model_dir = model_dir + '/models'
     home_dir = os.path.expanduser('~')
     config_file = os.path.join(home_dir, config_file_name)
-    
+
     json_mods = {
         'models-dir': model_dir,
         'layoutreader-model-dir': layoutreader_model_dir,
@@ -1361,7 +1369,14 @@ def download_model():
             not inside_function_or_class
             and line.startswith("    ")
             and line.strip()
-            and ("if Path(" in line or "with Path(" in line or "model_dir =" in line or "home_dir =" in line or "config_file =" in line or "json_mods =" in line)
+            and (
+                "if Path(" in line
+                or "with Path(" in line
+                or "model_dir =" in line
+                or "home_dir =" in line
+                or "config_file =" in line
+                or "json_mods =" in line
+            )
         ):
             problematic_lines.append(f"Line {i + 1}: {repr(line)}")
 
@@ -1372,7 +1387,7 @@ def download_model():
 
         print("\n💥 BUG REPRODUCED: The apply_patch tool incorrectly indented top-level code!")
         print("⚠️  This test documents a real bug that needs to be fixed.")
-        assert False, f"apply_patch tool created {len(problematic_lines)} incorrectly indented lines"
+        raise AssertionError(f"apply_patch tool created {len(problematic_lines)} incorrectly indented lines")
     else:
         print("✅ No indentation problems found - patch applied correctly!")
 

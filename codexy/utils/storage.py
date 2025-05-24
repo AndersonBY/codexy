@@ -1,15 +1,12 @@
-# -*- coding: utf-8 -*-
-
 """Utilities for persistent storage like command history."""
 
-import sys
 import json
+import sys
 import time
-from typing import List, TypedDict, Optional
+from typing import TypedDict
 
 from ..config import CONFIG_DIR
 from ..utils.security_check import SecurityChecker
-
 
 security_checker = SecurityChecker()
 
@@ -53,12 +50,12 @@ def is_sensitive_command(command: str) -> bool:
 # --- Command History Functions ---
 
 
-def load_command_history() -> List[HistoryEntry]:
+def load_command_history() -> list[HistoryEntry]:
     """Loads command history from the history file."""
     if not HISTORY_FILE.exists():
         return []
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
             history_data = json.load(f)
         # Basic validation: check if it's a list
         if isinstance(history_data, list):
@@ -66,15 +63,11 @@ def load_command_history() -> List[HistoryEntry]:
             # For now, assume the structure is correct if it's a list
             return history_data
         else:
-            print(
-                f"Warning: History file {HISTORY_FILE} does not contain a valid list. Starting fresh.", file=sys.stderr
-            )
+            print(f"Warning: History file {HISTORY_FILE} does not contain a valid list. Starting fresh.", file=sys.stderr)
             return []
-    except (IOError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         # Use stderr for warnings/errors that shouldn't pollute normal output
-        print(
-            f"Warning: Failed to load command history from {HISTORY_FILE}. Starting fresh. Error: {e}", file=sys.stderr
-        )
+        print(f"Warning: Failed to load command history from {HISTORY_FILE}. Starting fresh. Error: {e}", file=sys.stderr)
         return []
     except Exception as e:  # Catch unexpected errors
         print(
@@ -84,7 +77,7 @@ def load_command_history() -> List[HistoryEntry]:
         return []
 
 
-def save_command_history(history: List[HistoryEntry], config: Optional[HistoryConfig] = None):
+def save_command_history(history: list[HistoryEntry], config: HistoryConfig | None = None):
     """Saves command history to the history file."""
     cfg_to_use = config if config else DEFAULT_HISTORY_CONFIG
     max_size = cfg_to_use.get("max_size", DEFAULT_HISTORY_CONFIG.get("max_size", 1000))
@@ -94,7 +87,7 @@ def save_command_history(history: List[HistoryEntry], config: Optional[HistoryCo
         trimmed_history = history[-max_size:]
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(trimmed_history, f, indent=2)
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Failed to save command history to {HISTORY_FILE}: {e}", file=sys.stderr)
     except Exception as e:
         print(f"Error: An unexpected error occurred saving history to {HISTORY_FILE}: {e}", file=sys.stderr)
@@ -102,9 +95,9 @@ def save_command_history(history: List[HistoryEntry], config: Optional[HistoryCo
 
 def add_to_history(
     command: str,
-    history: List[HistoryEntry],
-    config: Optional[HistoryConfig] = None,
-) -> List[HistoryEntry]:
+    history: list[HistoryEntry],
+    config: HistoryConfig | None = None,
+) -> list[HistoryEntry]:
     """
     Adds a command to the history list if configured to save, it's not sensitive (using detect-secrets),
     and it's not an immediate duplicate. Saves the updated history to disk.
@@ -150,7 +143,7 @@ def clear_command_history():
             json.dump([], f)
         # Removed print statement - feedback should be in TUI
         # print(f"Command history cleared ({HISTORY_FILE})")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Failed to clear command history file {HISTORY_FILE}: {e}", file=sys.stderr)
         # Re-raise or handle more gracefully depending on requirements
         raise  # Or return False/status code

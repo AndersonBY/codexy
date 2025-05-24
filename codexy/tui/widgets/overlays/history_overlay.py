@@ -1,12 +1,11 @@
-from typing import List, cast
 from datetime import datetime
+from typing import cast
 
 from rich.text import Text
-
 from textual import events
 from textual.app import ComposeResult
 from textual.message import Message
-from textual.widgets import Static, ListItem, ListView, Label
+from textual.widgets import Label, ListItem, ListView, Static
 
 from ....utils.storage import HistoryEntry
 
@@ -61,7 +60,7 @@ class HistoryOverlay(Static):
         yield Label("Command History (↑/↓ Select, Enter Use, Esc Close)")
         yield ListView(id="history-list")
 
-    def set_history(self, history_entries: List[HistoryEntry]):
+    def set_history(self, history_entries: list[HistoryEntry]):
         """Fill the list with history entries."""
         list_view = self.query_one("#history-list", ListView)
         list_view.clear()  # Clear old entries

@@ -1,23 +1,21 @@
 import os
+import subprocess
 import sys
 import traceback
-import subprocess
 from pathlib import Path
-from typing import Tuple, Optional
 
 import click
 from rich.console import Console
 
-from ..tui import CodexTuiApp
-from ..config import load_config, AppConfig, INSTRUCTIONS_FILEPATH, DEFAULT_FULL_STDOUT
 from ..approvals import ApprovalMode
+from ..config import DEFAULT_FULL_STDOUT, INSTRUCTIONS_FILEPATH, AppConfig, load_config
+from ..tui import CodexTuiApp
 from .completion_scripts import _COMPLETION_SCRIPTS
-
 
 stderr_console = Console(stderr=True)
 
 
-@click.command(context_settings=dict(help_option_names=["-h", "--help"]))
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="codexy")
 @click.option("--model", "-m", help="Model to use for completions (e.g., o4-mini).")
 @click.option(
@@ -33,9 +31,7 @@ stderr_console = Console(stderr=True)
     type=click.Path(exists=True, dir_okay=False),
     help="Inspect a previously saved rollout instead of starting a session.",
 )
-@click.option(
-    "--quiet", "-q", is_flag=True, help="Non-interactive mode that only prints the assistant's final output."
-)
+@click.option("--quiet", "-q", is_flag=True, help="Non-interactive mode that only prints the assistant's final output.")
 @click.option("--config", "-c", is_flag=True, help="Open the instructions file in your editor.")
 @click.option(
     "--writable-root",
@@ -52,9 +48,7 @@ stderr_console = Console(stderr=True)
     help="Override the approval policy.",
 )
 @click.option("--auto-edit", is_flag=True, help="Automatically approve file edits; still prompt for commands.")
-@click.option(
-    "--full-auto", is_flag=True, help="Automatically approve edits and commands when executed in the sandbox."
-)
+@click.option("--full-auto", is_flag=True, help="Automatically approve edits and commands when executed in the sandbox.")
 @click.option("--no-project-doc", is_flag=True, help="Do not automatically include the repository's 'codex.md'.")
 @click.option(
     "--project-doc",
@@ -86,20 +80,20 @@ stderr_console = Console(stderr=True)
 @click.option("--full-context", "-f", is_flag=True, help='Launch in "full-context" mode.')
 @click.argument("prompt", required=False)
 def codexy(
-    prompt: Optional[str],
-    model: Optional[str],
-    image: Tuple[str, ...],
-    view: Optional[str],
+    prompt: str | None,
+    model: str | None,
+    image: tuple[str, ...],
+    view: str | None,
     quiet: bool,
     config: bool,
-    writable_root: Tuple[str, ...],
-    approval_mode: Optional[str],
+    writable_root: tuple[str, ...],
+    approval_mode: str | None,
     auto_edit: bool,
     full_auto: bool,
     no_project_doc: bool,
-    project_doc: Optional[str],
+    project_doc: str | None,
     full_stdout: bool,
-    notify: Optional[bool],
+    notify: bool | None,
     flex_mode: bool,
     dangerously_auto_approve_everything: bool,
     full_context: bool,
@@ -140,7 +134,7 @@ def codexy(
     )
 
 
-def generate_completion(shell: Optional[str]):  # Added type hint
+def generate_completion(shell: str | None):  # Added type hint
     """Generate shell completion script."""
     if shell is None:
         # Simple prompt if shell not provided
@@ -159,20 +153,20 @@ def generate_completion(shell: Optional[str]):  # Added type hint
 
 # Renamed kwargs keys to avoid conflicts and be more explicit
 def run_repl(
-    prompt: Optional[str],
-    model: Optional[str],
-    image: Tuple[str, ...],
-    view: Optional[str],
+    prompt: str | None,
+    model: str | None,
+    image: tuple[str, ...],
+    view: str | None,
     quiet: bool,
     handle_config_flag: bool,  # Renamed from config
-    writable_root: Tuple[str, ...],
-    cli_approval_mode: Optional[str],  # Renamed from approval_mode
+    writable_root: tuple[str, ...],
+    cli_approval_mode: str | None,  # Renamed from approval_mode
     auto_edit: bool,
     full_auto: bool,
     no_project_doc: bool,
-    project_doc: Optional[str],
+    project_doc: str | None,
     full_stdout: bool,  # Added parameter
-    notify: Optional[bool],
+    notify: bool | None,
     flex_mode: bool,  # Added parameter
     dangerously_auto_approve_everything: bool,
     full_context: bool,
@@ -194,9 +188,7 @@ def run_repl(
             if return_code != 0:
                 stderr_console.print(f"[yellow]Editor exited with code {return_code}.[/yellow]")
         except FileNotFoundError:
-            stderr_console.print(
-                f"[bold red]Error: Editor '{editor}' not found. Set the EDITOR environment variable.[/bold red]"
-            )
+            stderr_console.print(f"[bold red]Error: Editor '{editor}' not found. Set the EDITOR environment variable.[/bold red]")
         except Exception as e:
             stderr_console.print(f"[bold red]Error opening file '{INSTRUCTIONS_FILEPATH}': {e}[/bold red]")
         sys.exit(0)  # Exit after handling config flag

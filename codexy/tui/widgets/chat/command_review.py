@@ -1,16 +1,15 @@
 import json
 import time
-from typing import Optional, TypedDict, Union
+from typing import TypedDict
 
-from rich.text import Text
 from rich.syntax import Syntax
-
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Static, RadioSet, RadioButton, Input, Button, Label
+from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 
 from ....approvals import ApprovalMode
 
@@ -18,7 +17,7 @@ from ....approvals import ApprovalMode
 class CommandReviewResult(TypedDict):
     approved: bool
     always_approve: bool
-    feedback: Optional[str]
+    feedback: str | None
 
 
 class CommandReviewWidget(Static):
@@ -100,9 +99,9 @@ class CommandReviewWidget(Static):
     # --- State ---
     _tool_name: reactive[str] = reactive("")
     _command_display: reactive[str] = reactive("")
-    _tool_id: reactive[Optional[str]] = reactive(None)
+    _tool_id: reactive[str | None] = reactive(None)
     _mode: reactive[str] = reactive("select")
-    _explanation: reactive[Optional[str]] = reactive(None)
+    _explanation: reactive[str | None] = reactive(None)
     _feedback: reactive[str] = reactive("")
     _approval_mode: ApprovalMode = ApprovalMode.SUGGEST
 
@@ -110,7 +109,7 @@ class CommandReviewWidget(Static):
     class ReviewResult(Message):
         """Sent when the user makes an approval decision."""
 
-        def __init__(self, approved: bool, tool_id: Optional[str], always_approve: bool = False, feedback: Optional[str] = None):
+        def __init__(self, approved: bool, tool_id: str | None, always_approve: bool = False, feedback: str | None = None):
             self.approved = approved
             self.tool_id = tool_id
             self.always_approve = always_approve
@@ -176,7 +175,7 @@ class CommandReviewWidget(Static):
 
     def update_command_display(self):
         """Update command display area, with formatting."""
-        display_content: Union[str, Syntax, Text]
+        display_content: str | Syntax | Text
         try:
             parsed = json.loads(self._command_display)
             pretty_json = json.dumps(parsed, indent=2)

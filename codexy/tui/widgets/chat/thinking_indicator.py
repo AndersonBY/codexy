@@ -1,8 +1,6 @@
-from typing import Optional
-
 from textual.reactive import reactive
-from textual.widgets import Static
 from textual.timer import Timer
+from textual.widgets import Static
 
 
 class ThinkingIndicator(Static):
@@ -18,7 +16,7 @@ class ThinkingIndicator(Static):
     message: reactive[str] = reactive("Thinking")
     thinking_seconds: reactive[int] = reactive(0)
     _dots: reactive[str] = reactive(".")
-    _timer: Optional[Timer] = None
+    _timer: Timer | None = None
 
     def on_mount(self) -> None:
         """Start animation timer."""

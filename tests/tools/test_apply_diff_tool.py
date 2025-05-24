@@ -1,10 +1,11 @@
 import sys
-import pytest
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from codexy.tools.apply_diff_tool import parse_diff_blocks, apply_diff_tool
+from codexy.tools.apply_diff_tool import apply_diff_tool, parse_diff_blocks
 
 # --- Test Fixtures ---
 
@@ -127,11 +128,11 @@ content to delete
 
 def test_parse_diff_blocks_whitespace_variations():
     """Test parsing a diff with whitespace variations in markers."""
-    diff_text = """  <<<<<<<   SEARCH  
+    diff_text = """  <<<<<<<   SEARCH
 :start_line:15
--------  
+-------
 text
-=======   
+=======
 new text
 >>>>>>>  REPLACE  """
 

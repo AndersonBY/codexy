@@ -3,7 +3,6 @@ from pathlib import Path
 
 from openai.types.chat import ChatCompletionToolParam
 
-
 PROJECT_ROOT = Path.cwd()
 
 
@@ -75,7 +74,7 @@ def apply_diff_tool(path: str, diff: str) -> str:
 
     # --- Read File Content ---
     try:
-        with open(resolved_path, "r", encoding="utf-8") as f:
+        with open(resolved_path, encoding="utf-8") as f:
             original_lines = f.readlines()  # Read lines into a list
     except Exception as e:
         return f"Error reading file '{path}' for diff application: {e}"
@@ -99,7 +98,9 @@ def apply_diff_tool(path: str, diff: str) -> str:
                 else:
                     print(f"Single line mismatch - expected: '{search_content}', actual: '{current_line}'")
 
-            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
+            errors.append(
+                f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content."
+            )
             continue
 
         # Multi-line processing
@@ -132,7 +133,9 @@ def apply_diff_tool(path: str, diff: str) -> str:
             applied_count += 1
             print(f"Successfully applied multi-line diff block starting at line {start_line} to {path}")
         else:
-            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
+            errors.append(
+                f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content."
+            )
 
     # --- Write Modified Content Back ---
     if applied_count > 0 and not errors:  # Only write if at least one block applied and no errors occurred
@@ -163,7 +166,7 @@ APPLY_DIFF_TOOL_DEF: ChatCompletionToolParam = {
                 },
                 "diff": {
                     "type": "string",
-                    "description": """A string defining the changes in SEARCH/REPLACE block format. 
+                    "description": """A string defining the changes in SEARCH/REPLACE block format.
 
 **EXACT FORMAT REQUIRED:**
 ```
@@ -181,7 +184,7 @@ NEW_CONTENT_TO_REPLACE_WITH
 2. Next line: `:start_line:NUMBER` where NUMBER is the 1-based line number where SEARCH content starts
 3. Separator: At least 2 hyphens `--` or more `-------` on their own line
 4. EXACT_CONTENT_TO_FIND: Must match the file content character-for-character (including whitespace)
-5. Separator: At least 2 equals `==` or more `=======` on their own line  
+5. Separator: At least 2 equals `==` or more `=======` on their own line
 6. NEW_CONTENT_TO_REPLACE_WITH: The replacement content
 7. Must end with `>>>>>>> REPLACE` (exactly 7 > symbols + space + REPLACE)
 

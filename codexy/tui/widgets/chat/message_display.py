@@ -1,13 +1,13 @@
-# -*- coding: utf-8 -*-
 import json
 import time
-from typing import Union
 
-from textual.app import ComposeResult
-from textual.widgets import Static, Markdown, Label
-from textual.containers import Horizontal
+import pyperclip
 from rich.syntax import Syntax
 from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.timer import Timer
+from textual.widgets import Button, Label, Markdown, Static
 
 
 class BaseMessageDisplay(Static):
@@ -63,7 +63,7 @@ class UserMessageDisplay(BaseMessageDisplay):
 
 
 class AssistantMessageDisplay(BaseMessageDisplay):
-    """Display assistant messages, with Markdown support."""
+    """Display assistant messages, with Markdown support and a copy button."""
 
     DEFAULT_CSS = """
     AssistantMessageDisplay {
@@ -72,27 +72,47 @@ class AssistantMessageDisplay(BaseMessageDisplay):
         width: auto;
         max-width: 85%;
         height: auto;
-        /* background: $panel-lighten-1; */ /* Optional background */
     }
-    AssistantMessageDisplay > Markdown {
+    AssistantMessageDisplay > Vertical { /* Use Vertical to stack Markdown and Button */
+        height: auto;
+    }
+    AssistantMessageDisplay > Vertical > Markdown {
         margin: 0;
         padding: 0;
         height: auto;
     }
+    AssistantMessageDisplay > Vertical > Button.copy-button {
+        display: none; /* Start hidden */
+        width: auto;
+        height: 1;
+        min-width: 8; /* "Copy" + padding */
+        margin-top: 1;
+        padding: 0 1;
+        border: none; /* Minimalist button style */
+        background: $primary-background;
+        color: $text;
+    }
+    AssistantMessageDisplay > Vertical > Button.copy-button:hover {
+        background: $primary;
+    }
+    AssistantMessageDisplay > Vertical > Button.copy-button.copied {
+        background: $success;
+    }
     """
 
-    THROTTLE_INTERVAL: float = 0.1  # Update interval, e.g. 0.1 seconds (100ms)
+    THROTTLE_INTERVAL: float = 0.1
     _last_update_time: float = 0.0
 
     def __init__(self, initial_text: str = "", **kwargs):
         super().__init__(**kwargs)  # Initialize parent Static class
         self._full_text: str = initial_text
-        self.styles.height = "auto"  # Ensure initial height allows content
+        self.styles.height = "auto"
+        self._copy_button_text_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
-        """Create a Markdown child component to display content."""
-        # Create Markdown component in compose, using initial text
-        yield Markdown(self._full_text, id="assistant-markdown-content")
+        with Vertical():
+            yield Markdown(self._full_text, id="assistant-markdown-content")
+            yield Button("Copy", id="copy-text-button", classes="copy-button")
 
     def _update_markdown_widget(self):
         """Actual method to update the Markdown component content."""
@@ -134,12 +154,40 @@ class AssistantMessageDisplay(BaseMessageDisplay):
         self._update_markdown_widget()
 
     def finalize_text(self):
-        """
-        Force final UI update, ensuring the final complete text is displayed.
-        This method will be called in the background Worker thread,
-        and needs to use call_later to update UI.
-        """
-        self.app.call_later(self._update_markdown_widget)
+        """Force final UI update and show the copy button."""
+        self.app.call_later(self._show_final_content_and_button)
+
+    def _show_final_content_and_button(self):
+        """Helper to update UI on the main thread."""
+        self._update_markdown_widget()
+        try:
+            copy_button = self.query_one("#copy-text-button", Button)
+            copy_button.display = True  # Show the button
+            copy_button.label = "Copy"  # Reset label
+        except Exception as e:
+            if self.is_mounted:
+                self.log.error(f"Error showing copy button: {e}")
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "copy-text-button":
+            event.stop()
+            if self._full_text:
+                pyperclip.copy(self._full_text)
+                event.button.label = "Copied!"
+                event.button.add_class("copied")
+
+                if self._copy_button_text_timer:
+                    self._copy_button_text_timer.stop()
+                self._copy_button_text_timer = self.set_timer(2.0, lambda: self._revert_copy_button_text(event.button))
+            else:
+                event.button.label = "Nothing to copy"
+                self.set_timer(2.0, lambda: self._revert_copy_button_text(event.button))
+
+    def _revert_copy_button_text(self, button: Button):
+        if button.is_mounted:
+            button.label = "Copy"
+            button.remove_class("copied")
+        self._copy_button_text_timer = None
 
 
 # --- ToolCallDisplay, ToolOutputDisplay, SystemMessageDisplay ---
@@ -206,7 +254,7 @@ class ToolCallDisplay(BaseMessageDisplay):
         try:
             args_static = self.query_one("#args-display", Static)
             args_static.styles.height = "auto"  # Ensure height recalculates
-            display_content: Union[Syntax, Text]
+            display_content: Syntax | Text
 
             try:
                 parsed_args = json.loads(self._arguments)

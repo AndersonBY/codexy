@@ -1,19 +1,16 @@
-# -*- coding: utf-8 -*-
-
 """Implementations for the tools callable by the agent."""
 
+from .apply_diff_tool import APPLY_DIFF_TOOL_DEF, apply_diff_tool
+from .apply_patch_tool import APPLY_PATCH_TOOL_DEF, apply_patch
+from .execute_command_tool import EXECUTE_COMMAND_TOOL_DEF, execute_command_tool
 from .file_tools import (
-    read_file_tool,
-    write_to_file_tool,
-    list_files_tool,
+    LIST_FILES_TOOL_DEF,
     READ_FILE_TOOL_DEF,
     WRITE_TO_FILE_TOOL_DEF,
-    LIST_FILES_TOOL_DEF,
+    list_files_tool,
+    read_file_tool,
+    write_to_file_tool,
 )
-from .apply_patch_tool import apply_patch, APPLY_PATCH_TOOL_DEF
-from .apply_diff_tool import apply_diff_tool, APPLY_DIFF_TOOL_DEF
-from .execute_command_tool import execute_command_tool, EXECUTE_COMMAND_TOOL_DEF
-
 
 # --- Tool Registration ---
 # Map tool names (used by the LLM) to their Python functions

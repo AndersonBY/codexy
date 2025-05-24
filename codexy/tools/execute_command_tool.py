@@ -2,10 +2,8 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Optional, List
 
 from openai.types.chat import ChatCompletionToolParam
-
 
 PROJECT_ROOT = Path.cwd()
 DEFAULT_MAX_OUTPUT_LINES = 20
@@ -13,9 +11,9 @@ DEFAULT_MAX_OUTPUT_LINES = 20
 
 def execute_command_tool(
     command: str,
-    cwd: Optional[str] = None,
+    cwd: str | None = None,
     is_sandboxed: bool = False,
-    allowed_write_paths: Optional[List[Path]] = None,
+    allowed_write_paths: list[Path] | None = None,
     full_stdout: bool = False,
 ) -> str:
     """

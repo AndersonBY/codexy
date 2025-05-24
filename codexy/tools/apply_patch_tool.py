@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 Enhanced tool for applying patches with context-based matching.
 Inspired by codex-cli with fuzzy matching and Unicode handling.
@@ -7,9 +5,9 @@ Inspired by codex-cli with fuzzy matching and Unicode handling.
 
 import os
 import unicodedata
-from pathlib import Path
-from typing import List, Optional, Union, cast, Tuple, Dict
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import cast
 
 from openai.types.chat import ChatCompletionToolParam
 
@@ -35,7 +33,7 @@ HUNK_HEADER_PREFIX = "@@"
 
 # --- Unicode Normalization for Better Matching ---
 # Handle common punctuation look-alikes that AI models often confuse
-PUNCT_EQUIV: Dict[str, str] = {
+PUNCT_EQUIV: dict[str, str] = {
     # Hyphen/dash variants
     "-": "-",  # HYPHEN-MINUS
     "\u2010": "-",  # HYPHEN
@@ -119,25 +117,25 @@ class Chunk:
     """Represents a modification chunk with line indices and content changes."""
 
     orig_index: int  # 0-based line index in original file where chunk starts
-    del_lines: List[str] = field(default_factory=list)  # Lines to delete
-    ins_lines: List[str] = field(default_factory=list)  # Lines to insert
+    del_lines: list[str] = field(default_factory=list)  # Lines to delete
+    ins_lines: list[str] = field(default_factory=list)  # Lines to insert
 
 
 @dataclass
 class UpdateOp:
     type: str = field(default="update", init=False)
     path: str
-    chunks: List[Chunk] = field(default_factory=list)  # Use chunks instead of raw diff_hunk
-    move_to: Optional[str] = None
+    chunks: list[Chunk] = field(default_factory=list)  # Use chunks instead of raw diff_hunk
+    move_to: str | None = None
 
 
-ParsedOperation = Union[AddOp, DeleteOp, UpdateOp]
+ParsedOperation = AddOp | DeleteOp | UpdateOp
 
 
 # --- Enhanced Context Finding with Fuzzy Matching ---
 
 
-def find_context_core(file_lines: List[str], context_lines: List[str], start_from: int) -> Tuple[int, int]:
+def find_context_core(file_lines: list[str], context_lines: list[str], start_from: int) -> tuple[int, int]:
     """
     Find context in file with multiple matching strategies.
     Returns (line_index, fuzz_score) where fuzz_score indicates match quality.
@@ -176,7 +174,9 @@ def find_context_core(file_lines: List[str], context_lines: List[str], start_fro
     return -1, 0
 
 
-def find_context_with_eof_handling(file_lines: List[str], context_lines: List[str], start_from: int, is_eof: bool) -> Tuple[int, int]:
+def find_context_with_eof_handling(
+    file_lines: list[str], context_lines: list[str], start_from: int, is_eof: bool
+) -> tuple[int, int]:
     """
     Find context with special handling for end-of-file context.
     """
@@ -197,7 +197,7 @@ def find_context_with_eof_handling(file_lines: List[str], context_lines: List[st
         return find_context_core(file_lines, context_lines, start_from)
 
 
-def parse_traditional_patch_section(lines: List[str], start_idx: int) -> Tuple[List[str], List[Chunk], int, bool]:
+def parse_traditional_patch_section(lines: list[str], start_idx: int) -> tuple[list[str], list[Chunk], int, bool]:
     """
     Parse traditional unified diff format.
     This is the original logic that worked before.
@@ -214,7 +214,13 @@ def parse_traditional_patch_section(lines: List[str], start_idx: int) -> Tuple[L
         line = lines[i]
 
         # Check for section terminators
-        terminator_prefixes = [PATCH_SUFFIX.strip(), UPDATE_FILE_PREFIX, DELETE_FILE_PREFIX, ADD_FILE_PREFIX, END_OF_FILE_PREFIX.strip()]
+        terminator_prefixes = [
+            PATCH_SUFFIX.strip(),
+            UPDATE_FILE_PREFIX,
+            DELETE_FILE_PREFIX,
+            ADD_FILE_PREFIX,
+            END_OF_FILE_PREFIX.strip(),
+        ]
         if any(line.strip().startswith(prefix.strip()) for prefix in terminator_prefixes):
             break
 
@@ -281,7 +287,7 @@ def parse_traditional_patch_section(lines: List[str], start_idx: int) -> Tuple[L
     return context_lines, chunks, i, is_eof
 
 
-def parse_enhanced_patch_section(lines: List[str], start_idx: int) -> Tuple[List[str], List[Chunk], int, bool]:
+def parse_enhanced_patch_section(lines: list[str], start_idx: int) -> tuple[list[str], list[Chunk], int, bool]:
     """
     Parse a section of patch lines into context and chunks.
     Supports both traditional unified diff format and enhanced @@ block format.
@@ -311,7 +317,13 @@ def parse_enhanced_patch_section(lines: List[str], start_idx: int) -> Tuple[List
         line = lines[i]
 
         # Check for section terminators
-        terminator_prefixes = [PATCH_SUFFIX.strip(), UPDATE_FILE_PREFIX, DELETE_FILE_PREFIX, ADD_FILE_PREFIX, END_OF_FILE_PREFIX.strip()]
+        terminator_prefixes = [
+            PATCH_SUFFIX.strip(),
+            UPDATE_FILE_PREFIX,
+            DELETE_FILE_PREFIX,
+            ADD_FILE_PREFIX,
+            END_OF_FILE_PREFIX.strip(),
+        ]
         if any(line.strip().startswith(prefix.strip()) for prefix in terminator_prefixes):
             break
 
@@ -342,7 +354,7 @@ def parse_enhanced_patch_section(lines: List[str], start_idx: int) -> Tuple[List
     return [], chunks, i, is_eof
 
 
-def parse_enhanced_at_block(lines: List[str], start_idx: int) -> Tuple[List[str], int]:
+def parse_enhanced_at_block(lines: list[str], start_idx: int) -> tuple[list[str], int]:
     """
     Parse a single enhanced @@ block until the next @@ or section terminator.
     This handles the user's format where @@ separates independent blocks.
@@ -360,7 +372,14 @@ def parse_enhanced_at_block(lines: List[str], start_idx: int) -> Tuple[List[str]
 
         # Stop at section terminators
         if line.strip().startswith("***") or any(
-            line.strip().startswith(prefix.strip()) for prefix in [PATCH_SUFFIX.strip(), UPDATE_FILE_PREFIX, DELETE_FILE_PREFIX, ADD_FILE_PREFIX, END_OF_FILE_PREFIX.strip()]
+            line.strip().startswith(prefix.strip())
+            for prefix in [
+                PATCH_SUFFIX.strip(),
+                UPDATE_FILE_PREFIX,
+                DELETE_FILE_PREFIX,
+                ADD_FILE_PREFIX,
+                END_OF_FILE_PREFIX.strip(),
+            ]
         ):
             break
 
@@ -370,7 +389,7 @@ def parse_enhanced_at_block(lines: List[str], start_idx: int) -> Tuple[List[str]
     return block_lines, i
 
 
-def parse_enhanced_at_block_to_chunk(block_lines: List[str]) -> Optional[Chunk]:
+def parse_enhanced_at_block_to_chunk(block_lines: list[str]) -> Chunk | None:
     """
     Convert a single enhanced @@ block into a Chunk object.
     This processes -/+ lines from the user's format.
@@ -400,7 +419,7 @@ def parse_enhanced_at_block_to_chunk(block_lines: List[str]) -> Optional[Chunk]:
 # --- Core Parsing Logic ---
 
 
-def _parse_patch_text(patch_text: str) -> List[ParsedOperation]:
+def _parse_patch_text(patch_text: str) -> list[ParsedOperation]:
     """
     Parses the patch format text into a list of structured operations.
     Enhanced with better error handling and flexibility.
@@ -415,9 +434,9 @@ def _parse_patch_text(patch_text: str) -> List[ParsedOperation]:
     patch_body = patch_text[len(PATCH_PREFIX) : patch_text.rfind(PATCH_SUFFIX.strip())].strip("\n")
     lines = patch_body.splitlines()
 
-    operations: List[ParsedOperation] = []
-    current_op: Optional[ParsedOperation] = None
-    line_buffer: List[str] = []
+    operations: list[ParsedOperation] = []
+    current_op: ParsedOperation | None = None
+    line_buffer: list[str] = []
 
     i = 0
     while i < len(lines):
@@ -464,7 +483,7 @@ def _parse_patch_text(patch_text: str) -> List[ParsedOperation]:
                 current_op = None
 
         elif current_op is not None:
-            if isinstance(current_op, (AddOp, UpdateOp)):
+            if isinstance(current_op, AddOp | UpdateOp):
                 line_buffer.append(line)
         elif line.strip():
             # Provide context for debugging
@@ -488,7 +507,7 @@ def _parse_patch_text(patch_text: str) -> List[ParsedOperation]:
     return operations
 
 
-def _finalize_operation(current_op: ParsedOperation, line_buffer: List[str]) -> None:
+def _finalize_operation(current_op: ParsedOperation, line_buffer: list[str]) -> None:
     """Helper function to finalize an operation with its accumulated lines."""
     if isinstance(current_op, AddOp):
         # For ADD operations, collect + lines as content
@@ -555,7 +574,9 @@ def _apply_enhanced_update(original_content: str, update_op: UpdateOp) -> str:
 
                         if normalize_text_for_matching(actual_line) != normalize_text_for_matching(expected_line):
                             # Try more fuzzy matching
-                            if normalize_text_for_matching(actual_line.replace(" ", "")) == normalize_text_for_matching(expected_line.replace(" ", "")):
+                            if normalize_text_for_matching(actual_line.replace(" ", "")) == normalize_text_for_matching(
+                                expected_line.replace(" ", "")
+                            ):
                                 total_fuzz += 50  # Whitespace difference
                             else:
                                 match_valid = False
@@ -675,7 +696,9 @@ def _apply_traditional_update(original_content: str, update_op: UpdateOp) -> str
                     if expected_stripped == actual_stripped:
                         total_fuzz += 100  # High fuzz for whitespace differences
                     else:
-                        print(f"Warning: Line content mismatch at {delete_index + 1}. Expected: {repr(chunk.del_lines[i])}, Got: {repr(result_lines[delete_index])}")
+                        print(
+                            f"Warning: Line content mismatch at {delete_index + 1}. Expected: {repr(chunk.del_lines[i])}, Got: {repr(result_lines[delete_index])}"
+                        )
 
                 result_lines.pop(adjusted_chunk_start)  # Always remove from start of chunk
 
@@ -711,12 +734,12 @@ def _resolve_and_check_path(relative_path: str, base_dir: Path = PROJECT_ROOT) -
 # --- Main Tool Function ---
 
 
-def _merge_update_operations(operations: List[ParsedOperation]) -> List[ParsedOperation]:
+def _merge_update_operations(operations: list[ParsedOperation]) -> list[ParsedOperation]:
     """
     Merges multiple UPDATE operations for the same file into a single operation.
     """
-    merged_operations: List[ParsedOperation] = []
-    update_groups: Dict[str, List[UpdateOp]] = {}
+    merged_operations: list[ParsedOperation] = []
+    update_groups: dict[str, list[UpdateOp]] = {}
 
     for op in operations:
         if op.type == "update":
@@ -830,7 +853,9 @@ def apply_patch(patch_text: str) -> str:
     summary = "\n".join(results)
     if errors:
         error_summary = "\n".join(errors)
-        final_message = f"Patch applied with errors:\n--- Successes ---\n{summary if summary else 'None'}\n--- Errors ---\n{error_summary}"
+        final_message = (
+            f"Patch applied with errors:\n--- Successes ---\n{summary if summary else 'None'}\n--- Errors ---\n{error_summary}"
+        )
         return final_message
     else:
         return f"Patch applied successfully:\n{summary}"
@@ -859,7 +884,7 @@ ACTION can be Add, Update, or Delete.
 For Update operations, provide context around changes:
 [context_before]
 - [old_code]
-+ [new_code] 
++ [new_code]
 [context_after]
 
 Use @@ markers to specify location when needed:

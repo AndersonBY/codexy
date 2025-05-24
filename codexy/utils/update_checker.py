@@ -1,19 +1,17 @@
-# -*- coding: utf-8 -*-
-
 """Utility for checking for new versions of the codexy package on PyPI."""
 
-import sys
-import json
-import httpx
 import asyncio
+import json
+import sys
 from datetime import datetime, timezone
 from importlib import metadata
-from typing import Optional, TypedDict, cast
+from typing import TypedDict, cast
 
+import httpx
 from packaging.version import parse as parse_version
 
-from ..config import CONFIG_DIR
 from .. import PACKAGE_NAME
+from ..config import CONFIG_DIR
 
 # Constants
 PYPI_URL_TEMPLATE = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
@@ -37,19 +35,19 @@ class UpdateInfo(TypedDict):
 # --- State Management ---
 
 
-def _read_state() -> Optional[UpdateCheckState]:
+def _read_state() -> UpdateCheckState | None:
     """Reads the last check state from the JSON file."""
     if not STATE_FILE.exists():
         return None
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        with open(STATE_FILE, encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, dict) and "last_check_ts" in data:
                 return cast(UpdateCheckState, data)  # Use cast after validation
             else:
                 print(f"Warning: Invalid format in {STATE_FILE}. Ignoring.", file=sys.stderr)
                 return None
-    except (IOError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Warning: Could not read update check state from {STATE_FILE}: {e}", file=sys.stderr)
         return None
     except Exception as e:
@@ -63,7 +61,7 @@ def _write_state(state: UpdateCheckState):
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Could not write update check state to {STATE_FILE}: {e}", file=sys.stderr)
     except Exception as e:
         print(f"Error: Unexpected error writing update state {STATE_FILE}: {e}", file=sys.stderr)
@@ -72,7 +70,7 @@ def _write_state(state: UpdateCheckState):
 # --- Version Information ---
 
 
-async def _get_current_version() -> Optional[str]:
+async def _get_current_version() -> str | None:
     """Gets the currently installed version of the package."""
     try:
         return metadata.version(PACKAGE_NAME)
@@ -84,7 +82,7 @@ async def _get_current_version() -> Optional[str]:
         return None
 
 
-async def _fetch_latest_version() -> Optional[str]:
+async def _fetch_latest_version() -> str | None:
     """Fetches the latest version string from PyPI."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:  # Add a timeout
@@ -114,7 +112,7 @@ async def _fetch_latest_version() -> Optional[str]:
 # --- Main Check Function ---
 
 
-async def check_for_updates() -> Optional[UpdateInfo]:
+async def check_for_updates() -> UpdateInfo | None:
     """
     Checks PyPI for a newer version of the package if enough time has passed.
 
