@@ -86,7 +86,7 @@ def save_command_history(history: list[HistoryEntry], config: HistoryConfig | No
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         trimmed_history = history[-max_size:]
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(trimmed_history, f, indent=2)
+            json.dump(trimmed_history, f, indent=2, ensure_ascii=False)
     except OSError as e:
         print(f"Error: Failed to save command history to {HISTORY_FILE}: {e}", file=sys.stderr)
     except Exception as e:
