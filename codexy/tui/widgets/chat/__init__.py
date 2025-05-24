@@ -1,14 +1,14 @@
+from .command_review import CommandReviewWidget
 from .header import ChatHeader
 from .history_view import ChatHistoryView
 from .input_area import ChatInputArea
 from .message_display import (
-    UserMessageDisplay,
     AssistantMessageDisplay,
+    SystemMessageDisplay,
     ToolCallDisplay,
     ToolOutputDisplay,
-    SystemMessageDisplay,
+    UserMessageDisplay,
 )
-from .command_review import CommandReviewWidget
 from .thinking_indicator import ThinkingIndicator
 
 __all__ = [

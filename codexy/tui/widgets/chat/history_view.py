@@ -1,12 +1,12 @@
-# -*- coding: utf-8 -*-
-from textual.containers import VerticalScroll, Container
+from textual.containers import Container, VerticalScroll
+
 from .message_display import (
-    BaseMessageDisplay,
-    UserMessageDisplay,
     AssistantMessageDisplay,
+    BaseMessageDisplay,
+    SystemMessageDisplay,
     ToolCallDisplay,
     ToolOutputDisplay,
-    SystemMessageDisplay,
+    UserMessageDisplay,
 )
 
 

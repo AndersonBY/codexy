@@ -1,12 +1,9 @@
-from typing import List, Tuple
-
 from rich.text import Text
-
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.message import Message
-from textual.widgets import Static, Label
+from textual.widgets import Label, Static
 
 
 class HelpOverlay(Static):
@@ -68,7 +65,7 @@ class HelpOverlay(Static):
     }
     """
 
-    COMMANDS: List[Tuple[str, str]] = [
+    COMMANDS: list[tuple[str, str]] = [
         ("/help", "Show this help overlay"),
         ("/model", "Switch the LLM model in-session"),
         ("/approval", "Switch auto-approval mode"),
@@ -80,7 +77,7 @@ class HelpOverlay(Static):
         ("q | exit | :q", "Exit codexy"),
     ]
 
-    KEYBINDINGS: List[Tuple[str, str]] = [
+    KEYBINDINGS: list[tuple[str, str]] = [
         ("Ctrl+J/Ctrl+Enter", "Submit message / Approve command"),
         ("Up/Down", "Navigate history / options"),
         ("ESC", "Cancel input / Deny command / Close overlay"),

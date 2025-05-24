@@ -1,43 +1,47 @@
-# -*- coding: utf-8 -*-
-
 """Core agent logic for interacting with OpenAI API."""
 
+import asyncio
+import inspect
+import json
 import os
 import sys
-import json
-import uuid
-import inspect
-import asyncio
 import traceback
+import uuid
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
-from typing import List, Dict, Set, Any, Optional, TypedDict, Union, cast, Sequence, AsyncIterator
+from typing import Any, TypedDict, cast
 
 from openai import (
-    AsyncOpenAI,
     APIConnectionError,
-    RateLimitError,
+    APIError,
     APIStatusError,
     APITimeoutError,
-    APIError,
+    AsyncOpenAI,
     BadRequestError,
+    RateLimitError,
 )
 from openai._types import NOT_GIVEN
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
-    ChatCompletionUserMessageParam,
     ChatCompletionToolMessageParam,
+    ChatCompletionToolParam,
+    ChatCompletionUserMessageParam,
 )
 from openai.types.chat.chat_completion_content_part_param import ChatCompletionContentPartParam
 from openai.types.chat.chat_completion_content_part_text_param import ChatCompletionContentPartTextParam
-from openai.types.chat import ChatCompletionToolParam
 from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
 
-from ..config import AppConfig, DEFAULT_FULL_STDOUT, DEFAULT_MEMORY_ENABLE_COMPRESSION, DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR, DEFAULT_MEMORY_KEEP_RECENT_MESSAGES
-from ..tools import TOOL_REGISTRY, AVAILABLE_TOOL_DEFS
-from ..utils import get_model_max_tokens # Use the new centralized function
+from ..config import (
+    DEFAULT_FULL_STDOUT,
+    DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR,
+    DEFAULT_MEMORY_ENABLE_COMPRESSION,
+    DEFAULT_MEMORY_KEEP_RECENT_MESSAGES,
+    AppConfig,
+)
+from ..tools import AVAILABLE_TOOL_DEFS, TOOL_REGISTRY
+from ..utils import get_model_max_tokens  # Use the new centralized function
 from ..utils.token_utils import approximate_tokens_used
-
 
 # Constants for retry logic
 MAX_RETRIES = 5
@@ -47,19 +51,19 @@ MAX_RETRY_DELAY_SECONDS = 30.0  # Maximum delay between retries
 
 class StreamEvent(TypedDict):
     type: str
-    content: Optional[str]
-    tool_call_id: Optional[str]
-    tool_function_name: Optional[str]
+    content: str | None
+    tool_call_id: str | None
+    tool_function_name: str | None
     # Reverted: Use tool_arguments_delta as the key name expected by the TUI
-    tool_arguments_delta: Optional[str]
+    tool_arguments_delta: str | None
 
 
 def create_stream_event(
     type: str,
-    content: Optional[str] = None,
-    tool_call_id: Optional[str] = None,
-    tool_function_name: Optional[str] = None,
-    tool_arguments_delta: Optional[str] = None,  # Use delta here
+    content: str | None = None,
+    tool_call_id: str | None = None,
+    tool_function_name: str | None = None,
+    tool_arguments_delta: str | None = None,  # Use delta here
 ) -> StreamEvent:
     return {
         "type": type,
@@ -90,16 +94,16 @@ class Agent:
             timeout=config.get("timeout") or float(os.environ.get("OPENAI_TIMEOUT_MS", 60000)) / 1000.0,
             max_retries=0,  # Disable automatic retries in the client, we handle it manually
         )
-        self.history: List[ChatCompletionMessageParam] = []
-        self.available_tools: List[ChatCompletionToolParam] = AVAILABLE_TOOL_DEFS
+        self.history: list[ChatCompletionMessageParam] = []
+        self.available_tools: list[ChatCompletionToolParam] = AVAILABLE_TOOL_DEFS
         self._cancelled: bool = False
         self._current_stream = None
-        self.session_id: Optional[str] = None
-        self.pending_tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
-        self.last_response_id: Optional[str] = None  # Track the last response ID
+        self.session_id: str | None = None
+        self.pending_tool_calls: list[ChatCompletionMessageToolCall] | None = None
+        self.last_response_id: str | None = None  # Track the last response ID
         self.compression_attempted_this_turn: bool = False
 
-    def _compress_history(self, max_tokens: int): # max_tokens is not directly used in this simple compression
+    def _compress_history(self, max_tokens: int):  # max_tokens is not directly used in this simple compression
         memory_config = self.config.get("memory")
         keep_recent_messages = DEFAULT_MEMORY_KEEP_RECENT_MESSAGES
         if memory_config and memory_config.get("keep_recent_messages") is not None:
@@ -109,49 +113,45 @@ class Agent:
             print("[Agent] History is empty, no compression needed.", file=sys.stderr)
             return
 
-        new_history: List[ChatCompletionMessageParam] = []
-        compressible_history: List[ChatCompletionMessageParam] = list(self.history) # Make a mutable copy
+        new_history: list[ChatCompletionMessageParam] = []
+        compressible_history: list[ChatCompletionMessageParam] = list(self.history)  # Make a mutable copy
 
-        # Preserve System Prompt
-        system_message_present = False
-        if compressible_history and compressible_history[0].get("role") == "system":
-            system_message = compressible_history.pop(0)
-            new_history.append(system_message)
-            system_message_present = True
-            print("[Agent] Preserved system message during compression.", file=sys.stderr)
+        # Preserve System Prompt        if compressible_history and compressible_history[0].get("role") == "system":            system_message = compressible_history.pop(0)            new_history.append(system_message)            print("[Agent] Preserved system message during compression.", file=sys.stderr)
 
         # Handle Empty or Short History (considering if system message was popped)
         # If only system message was present, len(compressible_history) is 0.
         # If system + k messages, and k <= keep_recent_messages, no compression.
         if len(compressible_history) <= keep_recent_messages:
-            print(f"[Agent] History length ({len(compressible_history)} non-system messages) is less than or equal to keep_recent_messages ({keep_recent_messages}). No compression needed.", file=sys.stderr)
+            print(
+                f"[Agent] History length ({len(compressible_history)} non-system messages) is less than or equal to keep_recent_messages ({keep_recent_messages}). No compression needed.",
+                file=sys.stderr,
+            )
             # Add back the compressible part to new_history (which might contain system message)
             new_history.extend(compressible_history)
-            self.history = new_history # In case system message was moved
+            self.history = new_history  # In case system message was moved
             return
 
         # Identify messages to be summarized and messages to be kept
         num_to_summarize = len(compressible_history) - keep_recent_messages
-        
+
         # Messages to keep are the last 'keep_recent_messages'
         messages_to_keep = compressible_history[-keep_recent_messages:]
 
         if num_to_summarize > 0:
             summary_message: ChatCompletionMessageParam = {
-                "role": "system", 
-                "content": f"[System: {num_to_summarize} previous message(s) were summarized due to context length constraints.]"
+                "role": "system",
+                "content": f"[System: {num_to_summarize} previous message(s) were summarized due to context length constraints.]",
             }
             new_history.append(summary_message)
             print(f"[Agent] Summarized {num_to_summarize} messages.", file=sys.stderr)
-        
+
         new_history.extend(messages_to_keep)
-        
+
         self.history = new_history
         final_msg = f"[Agent] History compressed. New length: {len(self.history)}."
         if num_to_summarize > 0:
             final_msg += f" Summarized {num_to_summarize} messages."
         print(final_msg, file=sys.stderr)
-
 
     def cancel(self):
         """Set the cancellation flag to interrupt the current Agent processing flow."""
@@ -166,9 +166,9 @@ class Agent:
         self.last_response_id = None  # Clear last response ID too
         print("[Agent] In-memory conversation history cleared.", file=sys.stderr)
 
-    def _prepare_messages(self) -> List[ChatCompletionMessageParam]:
+    def _prepare_messages(self) -> list[ChatCompletionMessageParam]:
         """Prepares the message history for the API call, including system prompt."""
-        api_messages: List[ChatCompletionMessageParam] = []
+        api_messages: list[ChatCompletionMessageParam] = []
         system_prompt = self.config.get("instructions")
         if system_prompt:
             # Ensure only one system message at the beginning
@@ -208,7 +208,7 @@ class Agent:
         self,
         tool_call: ChatCompletionMessageToolCall,
         is_sandboxed: bool = False,
-        allowed_write_paths: Optional[List[Path]] = None,
+        allowed_write_paths: list[Path] | None = None,
     ) -> str:
         """
         Internal implementation to execute a tool call.
@@ -265,9 +265,7 @@ class Agent:
                         call_args["full_stdout"] = self.config.get("full_stdout", DEFAULT_FULL_STDOUT)
 
                     if is_sandboxed:
-                        print(
-                            f"  [Agent] Passing sandbox context: is_sandboxed={is_sandboxed}, allowed_paths={allowed_write_paths}"
-                        )
+                        print(f"  [Agent] Passing sandbox context: is_sandboxed={is_sandboxed}, allowed_paths={allowed_write_paths}")
                 # --- End sandbox/write path passing ---
 
                 print(f"  [Agent] Calling {function_name} with args: {call_args}")
@@ -280,9 +278,7 @@ class Agent:
             print(f"Traceback:\n{formatted_traceback}", file=sys.stderr)
             return f"Error during execution of tool '{function_name}': {e}\n\nTraceback:\n{formatted_traceback}"
 
-    async def process_turn_stream(
-        self, prompt: Optional[str] = None, image_paths: Optional[List[str]] = None
-    ) -> AsyncIterator[StreamEvent]:
+    async def process_turn_stream(self, prompt: str | None = None, image_paths: list[str] | None = None) -> AsyncIterator[StreamEvent]:
         """
         Processes one turn of interaction with streaming.
         Yields StreamEvent objects for text deltas, tool calls, and errors.
@@ -290,10 +286,10 @@ class Agent:
         self._cancelled = False
         self._current_stream = None
         self.pending_tool_calls = None
-        self.compression_attempted_this_turn = False # Reset the flag
+        self.compression_attempted_this_turn = False  # Reset the flag
 
         if prompt:
-            user_content: Union[str, Sequence[ChatCompletionContentPartParam]]
+            user_content: str | Sequence[ChatCompletionContentPartParam]
             if image_paths:
                 print("Warning: Image input processing is not fully implemented yet.", file=sys.stderr)
                 text_part: ChatCompletionContentPartTextParam = {"type": "text", "text": prompt}
@@ -336,22 +332,28 @@ class Agent:
         if enable_compression:
             model_name = self.config["model"]
             model_max_tokens = get_model_max_tokens(model_name)
-            
+
             # Prepare messages once to get an idea of their token count *before* system prompt
             # This is a rough estimate as _prepare_messages adds system prompt later
             # which also consumes tokens. A more accurate way would be to estimate tokens
             # on the output of _prepare_messages, but that means calling it twice in worst case.
             # For now, let's estimate based on raw history.
-            current_tokens = approximate_tokens_used(self.history) 
-            
+            current_tokens = approximate_tokens_used(self.history)
+
             trigger_threshold = int(model_max_tokens * compression_threshold_factor)
 
-            print(f"[Agent] Context check: current_tokens={current_tokens}, trigger_threshold={trigger_threshold}, model_max_tokens={model_max_tokens}", file=sys.stderr)
+            print(
+                f"[Agent] Context check: current_tokens={current_tokens}, trigger_threshold={trigger_threshold}, model_max_tokens={model_max_tokens}",
+                file=sys.stderr,
+            )
 
             if current_tokens > trigger_threshold:
-                print(f"[Agent] Context length ({current_tokens}) nearing limit ({trigger_threshold}). Attempting to compress history...", file=sys.stderr)
-                self._compress_history(trigger_threshold) 
-                self.compression_attempted_this_turn = True # Set the flag
+                print(
+                    f"[Agent] Context length ({current_tokens}) nearing limit ({trigger_threshold}). Attempting to compress history...",
+                    file=sys.stderr,
+                )
+                self._compress_history(trigger_threshold)
+                self.compression_attempted_this_turn = True  # Set the flag
                 # History has potentially changed, so messages need to be re-prepared.
                 api_messages = self._prepare_messages()
             else:
@@ -388,13 +390,13 @@ class Agent:
                 self._current_stream = stream
                 print("[Agent] Stream connection established.", file=sys.stderr)
 
-                assistant_message_accumulator: Dict[str, Any] = {
+                assistant_message_accumulator: dict[str, Any] = {
                     "role": "assistant",
                     "content": None,
                     "tool_calls": [],
                 }
-                started_tool_call_indices: Set[int] = set()
-                tool_arguments_complete: Dict[int, str] = {}
+                started_tool_call_indices: set[int] = set()
+                tool_arguments_complete: dict[int, str] = {}
                 next_tool_index = 0  # Counter for assigning index if missing
 
                 async for chunk in stream:
@@ -441,17 +443,13 @@ class Agent:
 
                                 # Ensure list is long enough
                                 while len(tool_calls_list) <= index:
-                                    tool_calls_list.append(
-                                        {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
-                                    )
+                                    tool_calls_list.append({"id": None, "type": "function", "function": {"name": None, "arguments": ""}})
                                 current_call_entry = tool_calls_list[index]
 
                                 # --- Handle missing ID ---
                                 if tool_call_chunk.id:
                                     current_call_entry["id"] = tool_call_chunk.id
-                                elif (
-                                    current_call_entry["id"] is None and tool_call_chunk.function
-                                ):  # Generate only if not already assigned
+                                elif current_call_entry["id"] is None and tool_call_chunk.function:  # Generate only if not already assigned
                                     # Generate a temporary ID if missing
                                     temp_id = f"tool_call_id_{index}-{uuid.uuid4()}"
                                     current_call_entry["id"] = temp_id
@@ -477,14 +475,10 @@ class Agent:
                                     )
 
                                 # Handle arguments
-                                if (
-                                    tool_call_chunk.function and tool_call_chunk.function.arguments is not None
-                                ):  # Check for None
+                                if tool_call_chunk.function and tool_call_chunk.function.arguments is not None:  # Check for None
                                     args_chunk = tool_call_chunk.function.arguments
                                     # Accumulate/store complete arguments
-                                    tool_arguments_complete[index] = (
-                                        tool_arguments_complete.get(index, "") + args_chunk
-                                    )
+                                    tool_arguments_complete[index] = tool_arguments_complete.get(index, "") + args_chunk
                                     # Update the main accumulator immediately
                                     current_call_entry["function"]["arguments"] = tool_arguments_complete[index]
 
@@ -507,7 +501,7 @@ class Agent:
                     return
 
                 # <<< CONSOLIDATED FINALIZATION of Tool Calls >>>
-                final_tool_calls_for_history: List[ChatCompletionMessageToolCall] = []
+                final_tool_calls_for_history: list[ChatCompletionMessageToolCall] = []
                 if isinstance(assistant_message_accumulator.get("tool_calls"), list):
                     for index, tool_call_data in enumerate(assistant_message_accumulator["tool_calls"]):
                         # Use assigned ID and check for name
@@ -516,9 +510,7 @@ class Agent:
 
                         if final_id and final_name:
                             # Use the potentially complete arguments buffer
-                            final_args = tool_arguments_complete.get(
-                                index, tool_call_data["function"].get("arguments", "")
-                            )
+                            final_args = tool_arguments_complete.get(index, tool_call_data["function"].get("arguments", ""))
                             # Ensure final args are stored in the accumulator entry
                             tool_call_data["function"]["arguments"] = final_args
                             if not isinstance(final_args, str):
@@ -543,7 +535,7 @@ class Agent:
                             )
 
                 # <<< Assemble final message for history >>>
-                final_assistant_msg_dict: Dict[str, Any] = {"role": "assistant"}
+                final_assistant_msg_dict: dict[str, Any] = {"role": "assistant"}
                 content = assistant_message_accumulator.get("content")
                 if content:
                     final_assistant_msg_dict["content"] = content
@@ -583,21 +575,21 @@ class Agent:
                 print(f"[Agent] Attempt {attempt + 1} failed: {error_msg}", file=sys.stderr)
                 status_code = getattr(e, "status_code", None)
                 should_retry = (
-                    isinstance(e, (APITimeoutError, APIConnectionError))
-                    or isinstance(e, RateLimitError)
-                    or (isinstance(e, APIStatusError) and status_code and status_code >= 500)
+                    isinstance(e, APITimeoutError | APIConnectionError) or isinstance(e, RateLimitError) or (isinstance(e, APIStatusError) and status_code and status_code >= 500)
                 ) and attempt < MAX_RETRIES - 1
                 if isinstance(e, BadRequestError) and status_code == 400:
                     error_body = getattr(e, "body", {})
-                    error_detail = (
-                        error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
-                    )
+                    error_detail = error_body.get("error", {}).get("message", "") if isinstance(error_body, dict) else str(e)
                     if "context_length_exceeded" in error_detail or "maximum context length" in error_detail:
                         error_content: str
                         if self.compression_attempted_this_turn:
-                            error_content = "Error: Context length exceeded model's limit even after attempting history compression. Please clear history (/clear) or start a new session."
+                            error_content = (
+                                "Error: Context length exceeded model's limit even after attempting history compression. Please clear history (/clear) or start a new session."
+                            )
                         else:
-                            error_content = "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
+                            error_content = (
+                                "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
+                            )
                         yield create_stream_event(
                             type="error",
                             content=error_content,
@@ -615,11 +607,7 @@ class Agent:
                     if isinstance(e, APIStatusError):
                         try:
                             error_body = e.response.json()
-                            message = (
-                                error_body.get("error", {}).get("message", e.response.text)
-                                if isinstance(error_body, dict)
-                                else e.response.text
-                            )
+                            message = error_body.get("error", {}).get("message", e.response.text) if isinstance(error_body, dict) else e.response.text
                             friendly_error = f"API Error (Status {e.status_code}): {message}"
                         except Exception:
                             pass
@@ -634,14 +622,10 @@ class Agent:
                 print(f"[Agent] Attempt {attempt + 1} failed: An unexpected error occurred: {e}", file=sys.stderr)
                 traceback.print_exc(file=sys.stderr)
                 if attempt == MAX_RETRIES - 1:
-                    yield create_stream_event(
-                        type="error", content=f"Error: Max retries reached. Unexpected error: {e}"
-                    )
+                    yield create_stream_event(type="error", content=f"Error: Max retries reached. Unexpected error: {e}")
                     return
                 if attempt < 1:
-                    print(
-                        f"[Agent] Retrying unexpected error in {current_retry_delay:.2f} seconds...", file=sys.stderr
-                    )
+                    print(f"[Agent] Retrying unexpected error in {current_retry_delay:.2f} seconds...", file=sys.stderr)
                     await asyncio.sleep(current_retry_delay)
                     current_retry_delay = min(current_retry_delay * 2, MAX_RETRY_DELAY_SECONDS)
                     continue
@@ -650,14 +634,10 @@ class Agent:
                     return
 
         # If loop finishes without returning (all retries failed)
-        yield create_stream_event(
-            type="error", content=f"Error: Agent failed after {MAX_RETRIES} retries. Last error: {last_error}"
-        )
+        yield create_stream_event(type="error", content=f"Error: Agent failed after {MAX_RETRIES} retries. Last error: {last_error}")
         self._current_stream = None
 
-    async def continue_with_tool_results_stream(
-        self, tool_results: List[ChatCompletionToolMessageParam]
-    ) -> AsyncIterator[StreamEvent]:
+    async def continue_with_tool_results_stream(self, tool_results: list[ChatCompletionToolMessageParam]) -> AsyncIterator[StreamEvent]:
         """
         Adds tool results to history and yields subsequent stream events from the API.
         """

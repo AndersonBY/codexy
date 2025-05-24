@@ -1,14 +1,11 @@
-# -*- coding: utf-8 -*-
-
 """Filesystem and path related utility functions for codexy."""
 
 import os
 import subprocess
 from pathlib import Path
-from typing import Union
 
 
-def check_in_git(workdir: Union[str, Path]) -> bool:
+def check_in_git(workdir: str | Path) -> bool:
     """
     Checks if the given directory is part of a Git repository.
 
@@ -49,7 +46,7 @@ def check_in_git(workdir: Union[str, Path]) -> bool:
         return False
 
 
-def shorten_path(p: Union[str, Path], max_length: int = 40) -> str:
+def shorten_path(p: str | Path, max_length: int = 40) -> str:
     """
     Shortens a path string for display, similar to codex-cli's behavior.
 

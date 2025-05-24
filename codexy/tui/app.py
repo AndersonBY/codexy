@@ -1,46 +1,45 @@
 import json
 import traceback
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import List, Dict, Optional, AsyncIterator
 
 from openai.types.chat import ChatCompletionMessageToolCall, ChatCompletionToolMessageParam
 from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
-
-from textual.timer import Timer
-from textual.reactive import reactive
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, ListView
 from textual.containers import Container, VerticalScroll
+from textual.reactive import reactive
+from textual.timer import Timer
+from textual.widgets import Footer, ListView
 
 from .. import PACKAGE_NAME
-from ..core.agent import Agent, StreamEvent
+from ..approvals import ApprovalMode, add_to_always_approved, can_auto_approve
 from ..config import AppConfig, load_config
-from ..approvals import ApprovalMode, can_auto_approve, add_to_always_approved
+from ..core.agent import Agent, StreamEvent
+from ..utils.filesystem import check_in_git
+from ..utils.model_info import get_max_tokens_for_model
+from ..utils.model_utils import get_available_models
 from ..utils.storage import (
-    load_command_history,
+    DEFAULT_HISTORY_CONFIG,
+    HistoryEntry,
     add_to_history,
     clear_command_history,
-    HistoryEntry,
-    DEFAULT_HISTORY_CONFIG,
+    load_command_history,
 )
-from ..utils.filesystem import check_in_git
-from ..utils.update_checker import check_for_updates, UpdateInfo
-from ..utils.model_utils import get_available_models
-from ..utils.model_info import get_max_tokens_for_model
 from ..utils.token_utils import approximate_tokens_used
+from ..utils.update_checker import UpdateInfo, check_for_updates
+from .widgets.chat.command_review import CommandReviewWidget
+from .widgets.chat.header import ChatHeader
 from .widgets.chat.history_view import ChatHistoryView
 from .widgets.chat.input_area import ChatInputArea
-from .widgets.chat.command_review import CommandReviewWidget
 from .widgets.chat.message_display import (
-    UserMessageDisplay,
     AssistantMessageDisplay,
+    SystemMessageDisplay,
     ToolCallDisplay,
     ToolOutputDisplay,
-    SystemMessageDisplay,
+    UserMessageDisplay,
 )
-from .widgets.chat.header import ChatHeader
 from .widgets.chat.thinking_indicator import ThinkingIndicator
-from .widgets.overlays import HelpOverlay, HistoryOverlay, ModelOverlay, ApprovalModeOverlay
+from .widgets.overlays import ApprovalModeOverlay, HelpOverlay, HistoryOverlay, ModelOverlay
 
 
 class CodexTuiApp(App[None]):
@@ -152,7 +151,7 @@ class CodexTuiApp(App[None]):
         overflow: hidden;
     }
     ChatHeader {
-        height: auto; 
+        height: auto;
         dock: top;
     }
     Footer {
@@ -181,29 +180,29 @@ class CodexTuiApp(App[None]):
     show_model_overlay: reactive[bool] = reactive(False)
     show_approval_overlay: reactive[bool] = reactive(False)
     _fetching_models: bool = False
-    available_models: reactive[List[str]] = reactive(list)
+    available_models: reactive[list[str]] = reactive(list)
     thinking_seconds: reactive[int] = reactive(0)
     token_usage_percent: reactive[float] = reactive(100.0)
 
     # --- State ---
-    agent: Optional[Agent] = None
-    app_config: Optional[AppConfig] = None
-    pending_tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
-    tool_call_results: List[ChatCompletionToolMessageParam] = []
+    agent: Agent | None = None
+    app_config: AppConfig | None = None
+    pending_tool_calls: list[ChatCompletionMessageToolCall] | None = None
+    tool_call_results: list[ChatCompletionToolMessageParam] = []
     current_tool_call_index: int = 0
-    command_history: List[HistoryEntry] = []
+    command_history: list[HistoryEntry] = []
     history_config = DEFAULT_HISTORY_CONFIG
-    initial_prompt: Optional[str] = None
-    initial_images: Optional[List[str]] = None
-    _thinking_timer: Optional[Timer] = None
+    initial_prompt: str | None = None
+    initial_images: list[str] | None = None
+    _thinking_timer: Timer | None = None
     _processing_stream: bool = False
 
     # --- Initialization & Setup ---
     def __init__(
         self,
-        config: Optional[AppConfig] = None,
-        initial_prompt: Optional[str] = None,
-        initial_images: Optional[List[str]] = None,
+        config: AppConfig | None = None,
+        initial_prompt: str | None = None,
+        initial_images: list[str] | None = None,
     ):
         super().__init__()
         self.app_config = config or load_config(cwd=Path.cwd())
@@ -279,10 +278,7 @@ class CodexTuiApp(App[None]):
             cwd = Path.cwd()
             in_git = check_in_git(cwd)
             if not in_git and self.approval_mode != ApprovalMode.SUGGEST:
-                warning_message = (
-                    f"Warning: Running with approval mode '{self.approval_mode.value}' "
-                    f"outside a Git repository ({cwd}). Changes cannot be easily reverted."
-                )
+                warning_message = f"Warning: Running with approval mode '{self.approval_mode.value}' outside a Git repository ({cwd}). Changes cannot be easily reverted."
                 self.log.warning(warning_message)
                 history_view = self.query_one(ChatHistoryView)
                 self.call_later(history_view.add_message, SystemMessageDisplay(warning_message, style="bold yellow"))
@@ -310,7 +306,7 @@ class CodexTuiApp(App[None]):
     async def run_update_check(self):
         """Worker function to perform the update check."""
         try:
-            update_info: Optional[UpdateInfo] = await check_for_updates()
+            update_info: UpdateInfo | None = await check_for_updates()
             if update_info:
                 self.call_later(self._notify_update, update_info)
         except Exception as e:
@@ -334,10 +330,7 @@ class CodexTuiApp(App[None]):
 
     def _notify_update(self, update_info: UpdateInfo):
         """Displays the update notification."""
-        message = (
-            f"Update available! {update_info['current_version']} -> {update_info['latest_version']}.\n"
-            f"Run: [b]pip install --upgrade {PACKAGE_NAME}[/b]"
-        )
+        message = f"Update available! {update_info['current_version']} -> {update_info['latest_version']}.\nRun: [b]pip install --upgrade {PACKAGE_NAME}[/b]"
         self.notify(
             message,
             title="codexy Update",
@@ -440,7 +433,6 @@ class CodexTuiApp(App[None]):
                 input_area.display = False
                 thinking_indicator.set_class(True, "-hidden")
                 self.log.info("Showing Command Review.")
-                self.call_later(review_widget.focus)
             else:
                 self.log.info("Hiding Command Review.")
                 should_show_input = not self.is_loading and not self._is_any_overlay_active()  # <-- 使用助手
@@ -678,7 +670,7 @@ class CodexTuiApp(App[None]):
         await self.process_input(message.value)
         # Clear input after processing in process_input
 
-    async def process_input(self, user_input: str, image_paths: Optional[List[str]] = None):
+    async def process_input(self, user_input: str, image_paths: list[str] | None = None):
         """Process user input, handle special commands, and start Agent."""
         if not self.agent or not user_input.strip():
             return
@@ -755,17 +747,15 @@ class CodexTuiApp(App[None]):
         self.pending_tool_calls = None
         self.tool_call_results = []
         self.current_tool_call_index = 0
-        self.run_worker(
-            self.handle_agent_stream(prompt=user_input, image_paths=image_paths), exclusive=True, group="agent_main"
-        )
+        self.run_worker(self.handle_agent_stream(prompt=user_input, image_paths=image_paths), exclusive=True, group="agent_main")
         # Update token usage *after* adding user message to history
         self._update_token_usage()
 
     async def handle_agent_stream(
         self,
-        prompt: Optional[str] = None,
-        image_paths: Optional[List[str]] = None,
-        tool_results: Optional[List[ChatCompletionToolMessageParam]] = None,
+        prompt: str | None = None,
+        image_paths: list[str] | None = None,
+        tool_results: list[ChatCompletionToolMessageParam] | None = None,
     ):
         """Handle the agent's stream in a background worker."""
         if not self.agent:
@@ -779,8 +769,8 @@ class CodexTuiApp(App[None]):
         self._processing_stream = True  # Mark as processing
 
         history_view = self.query_one(ChatHistoryView)
-        current_assistant_message: Optional[AssistantMessageDisplay] = None
-        current_tool_displays: Dict[str, ToolCallDisplay] = {}
+        current_assistant_message: AssistantMessageDisplay | None = None
+        current_tool_displays: dict[str, ToolCallDisplay] = {}
 
         try:
             stream_iterator: AsyncIterator[StreamEvent]
@@ -841,9 +831,7 @@ class CodexTuiApp(App[None]):
                     self.is_loading = False
                     return
                 elif event["type"] == "cancelled":
-                    self.call_later(
-                        history_view.add_message, SystemMessageDisplay("Operation Cancelled.", style="yellow")
-                    )
+                    self.call_later(history_view.add_message, SystemMessageDisplay("Operation Cancelled.", style="yellow"))
                     self.is_loading = False
                     return
 
@@ -875,15 +863,10 @@ class CodexTuiApp(App[None]):
     def process_next_tool_call(self):
         """Process the next tool call in the pending list."""
         self.log.info(
-            f"--- process_next_tool_call: index={self.current_tool_call_index}, "
-            f"pending_count={len(self.pending_tool_calls) if self.pending_tool_calls else 0} ---"
+            f"--- process_next_tool_call: index={self.current_tool_call_index}, pending_count={len(self.pending_tool_calls) if self.pending_tool_calls else 0} ---"
         )
 
-        if (
-            not self.agent
-            or self.pending_tool_calls is None
-            or self.current_tool_call_index >= len(self.pending_tool_calls)
-        ):
+        if not self.agent or self.pending_tool_calls is None or self.current_tool_call_index >= len(self.pending_tool_calls):
             if self.tool_call_results:
                 self.log.info(f"All tools processed. Sending {len(self.tool_call_results)} result(s) back to agent.")
                 self.is_loading = True
@@ -933,9 +916,7 @@ class CodexTuiApp(App[None]):
         if not self.app_config:
             self.log.error("App config not available for approval check.")
             result_content = "Error: Configuration unavailable for approval."
-            self.call_later(
-                self.query_one(ChatHistoryView).add_message, SystemMessageDisplay(result_content, style="bold red")
-            )
+            self.call_later(self.query_one(ChatHistoryView).add_message, SystemMessageDisplay(result_content, style="bold red"))
             self.tool_call_results.append({"role": "tool", "tool_call_id": tool_id, "content": result_content})
             self.current_tool_call_index += 1
             self.call_later(self.process_next_tool_call)
@@ -948,9 +929,7 @@ class CodexTuiApp(App[None]):
 
         if safety_assessment["type"] == "auto-approve":
             self.log.info(f"Auto-approving tool call {tool_id} ({func_name}). Reason: {safety_assessment['reason']}")
-            self.run_worker(
-                self.execute_tool(tool_request, tool_args, run_in_sandbox), exclusive=False, group=f"tool-{tool_id}"
-            )
+            self.run_worker(self.execute_tool(tool_request, tool_args, run_in_sandbox), exclusive=False, group=f"tool-{tool_id}")
         elif safety_assessment["type"] == "reject":
             result_content = f"Tool call rejected by safety system: {safety_assessment['reason']}"
             self.log.warning(f"Rejecting tool call {tool_id} ({func_name}). Reason: {safety_assessment['reason']}")
@@ -1019,9 +998,7 @@ class CodexTuiApp(App[None]):
             self.log.info(f"User approved tool call {tool_id} ({func_name}). Always: {message.always_approve}")
             if message.always_approve and func_name:
                 add_to_always_approved(func_name, tool_args)
-            self.run_worker(
-                self.execute_tool(tool_request, tool_args, run_in_sandbox), exclusive=False, group=f"tool-{tool_id}"
-            )
+            self.run_worker(self.execute_tool(tool_request, tool_args, run_in_sandbox), exclusive=False, group=f"tool-{tool_id}")
         else:
             result_content = message.feedback or "Denied by user."
             self.log.info(f"User denied tool call {tool_id} ({func_name}). Feedback: '{result_content}'")
@@ -1032,7 +1009,7 @@ class CodexTuiApp(App[None]):
             self.current_tool_call_index += 1
             self.call_later(self.process_next_tool_call)
 
-    async def execute_tool(self, tool_request: ChatCompletionMessageToolCall, tool_args: Dict, is_sandboxed: bool):
+    async def execute_tool(self, tool_request: ChatCompletionMessageToolCall, tool_args: dict, is_sandboxed: bool):
         """Execute the tool in a background worker and handle results."""
         if not self.agent or not self.app_config:
             self.log.error("Agent or AppConfig not available for tool execution.")
@@ -1167,9 +1144,7 @@ class CodexTuiApp(App[None]):
         if input_area.is_mounted:
             self.call_later(input_area.focus_input)
 
-    def on_approval_mode_overlay_approval_mode_selected(
-        self, message: ApprovalModeOverlay.ApprovalModeSelected
-    ) -> None:
+    def on_approval_mode_overlay_approval_mode_selected(self, message: ApprovalModeOverlay.ApprovalModeSelected) -> None:
         """Handle mode selection from the approval overlay."""
         selected_mode = message.mode
         self.log.info(f"Received approval mode selection: {selected_mode.value}")

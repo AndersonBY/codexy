@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """Allows running the CLI via 'python -m codexy'."""
 
 # Ensure that the main CLI function is called when running as a module.

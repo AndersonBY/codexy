@@ -1,12 +1,9 @@
-from typing import Optional
-
 from rich.text import Text
-
 from textual import events
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import Static, OptionList, Label
+from textual.widgets import Label, OptionList, Static
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from ....approvals import ApprovalMode
@@ -144,7 +141,7 @@ class ApprovalModeOverlay(Static):
             option_list.clear_options()
             self.log.info("Cleared existing options.")
 
-            highlighted_index: Optional[int] = None
+            highlighted_index: int | None = None
             options_to_add = []
 
             # Create Option for each approval mode

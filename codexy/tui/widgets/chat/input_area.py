@@ -1,17 +1,17 @@
-from typing import List, Optional, cast
+from typing import cast
 
 from rich.text import Text
 from textual import events
-from textual.timer import Timer
+from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Container, Horizontal
 from textual.message import Message
 from textual.reactive import reactive
-from textual.app import ComposeResult
-from textual.widgets import TextArea, Static
-from textual.containers import Container, Horizontal
+from textual.timer import Timer
+from textual.widgets import Static, TextArea
 
-from .thinking_indicator import ThinkingIndicator
 from ....utils.storage import HistoryEntry
+from .thinking_indicator import ThinkingIndicator
 
 
 class ChatInputArea(Container):
@@ -86,10 +86,10 @@ class ChatInputArea(Container):
     token_usage_percent: reactive[float] = reactive(100.0)
 
     # --- State ---
-    _command_history: List[HistoryEntry] = []
-    _history_index: Optional[int] = None
+    _command_history: list[HistoryEntry] = []
+    _history_index: int | None = None
     _draft_input: str = ""
-    _thinking_timer: Optional[Timer] = None
+    _thinking_timer: Timer | None = None
 
     # --- Messages ---
     class Submit(Message):
@@ -107,7 +107,7 @@ class ChatInputArea(Container):
         with Container(id="input-help-container"):
             with Horizontal():
                 yield Static(
-                    "\[Ctrl+J] Submit | \[Up/Down] History | \[ESC] Cancel/Close",
+                    r"\[Ctrl+J] Submit | \[Up/Down] History | \[ESC] Cancel/Close",
                     classes="input-help-text",  # Use class for easier targeting
                     id="input-help-text",
                 )
@@ -152,7 +152,7 @@ class ChatInputArea(Container):
         """Set loading state."""
         self.is_loading = loading
 
-    def set_history(self, history: List[HistoryEntry]):
+    def set_history(self, history: list[HistoryEntry]):
         """Set command history."""
         self._command_history = history
         self._history_index = None

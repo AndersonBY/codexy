@@ -1,25 +1,23 @@
-# -*- coding: utf-8 -*-
-import sys
 import asyncio
-from typing import List, Optional
+import sys
 
-from openai import AsyncOpenAI, APIError
+from openai import APIError, AsyncOpenAI
 
 # --- Constants ---
 # Define recommended models (adjust as needed)
-RECOMMENDED_MODELS: List[str] = ["o4-mini", "o3", "gpt-4o", "gpt-4.1"]
+RECOMMENDED_MODELS: list[str] = ["o4-mini", "o3", "gpt-4o", "gpt-4.1"]
 MODEL_LIST_TIMEOUT_SECONDS = 5.0  # Timeout for fetching model list
 
 # --- Caching ---
 # Simple in-memory cache for the model list
-_cached_models: Optional[List[str]] = None
+_cached_models: list[str] | None = None
 _cache_lock = asyncio.Lock()
 _is_fetching = False
 
 # --- Functions ---
 
 
-async def _fetch_models_from_api(client: AsyncOpenAI) -> List[str]:
+async def _fetch_models_from_api(client: AsyncOpenAI) -> list[str]:
     """Fetches the list of models from the OpenAI API."""
     global _is_fetching
     if _is_fetching:
@@ -38,8 +36,7 @@ async def _fetch_models_from_api(client: AsyncOpenAI) -> List[str]:
         models = sorted(
             m.id
             for m in models_response.data
-            if m.id
-            and (m.id.startswith("gpt-") or m.id.startswith("ft:") or m.id.startswith("o3") or m.id.startswith("o4"))
+            if m.id and (m.id.startswith("gpt-") or m.id.startswith("ft:") or m.id.startswith("o3") or m.id.startswith("o4"))
         )
         print(f"Fetched {len(models)} models.", file=sys.stderr)
         return models
@@ -53,7 +50,7 @@ async def _fetch_models_from_api(client: AsyncOpenAI) -> List[str]:
         _is_fetching = False
 
 
-async def get_available_models(client: AsyncOpenAI, force_refresh: bool = False) -> List[str]:
+async def get_available_models(client: AsyncOpenAI, force_refresh: bool = False) -> list[str]:
     """
     Gets the list of available models, using cache if available and not forced.
     Adds recommended models even if the API call fails.
@@ -64,7 +61,7 @@ async def get_available_models(client: AsyncOpenAI, force_refresh: bool = False)
             fetched_models = await _fetch_models_from_api(client)
             # Combine fetched models with recommended models, ensuring uniqueness and sorting
             combined_models = set(fetched_models) | set(RECOMMENDED_MODELS)
-            _cached_models = sorted(list(combined_models))
+            _cached_models = sorted(combined_models)
             if not fetched_models:
                 print("Warning: Using only recommended models due to fetch failure.", file=sys.stderr)
 
@@ -93,7 +90,7 @@ async def is_model_supported(model_id: str, client: AsyncOpenAI) -> bool:
         return True
 
 
-def sort_models_for_display(models: List[str], current_model: str) -> List[str]:
+def sort_models_for_display(models: list[str], current_model: str) -> list[str]:
     """Sorts models, putting recommended and current at the top."""
     recommended_set = set(RECOMMENDED_MODELS)
     current_list = [m for m in models if m == current_model]

@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
-
 """Approval logic for executing commands and file operations."""
 
 import shlex
 from enum import Enum
 from pathlib import Path
-from typing import List, TypedDict, Optional, Set, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from .config import AppConfig
@@ -26,8 +24,8 @@ class SafetyAssessmentResult(TypedDict):
     """Result structure for safety assessment."""
 
     type: str  # 'auto-approve', 'ask-user', 'reject'
-    reason: Optional[str]  # Explanation for auto-approve/reject
-    group: Optional[str]  # Category for safe commands
+    reason: str | None  # Explanation for auto-approve/reject
+    group: str | None  # Category for safe commands
     run_in_sandbox: bool  # Whether execution requires sandboxing
 
 
@@ -35,7 +33,7 @@ class SafetyAssessmentResult(TypedDict):
 
 # Commands approved with "Always" for the current session
 # Stores derived keys (e.g., "exec:ls", "apply_diff")
-_session_always_approved: Set[str] = set()
+_session_always_approved: set[str] = set()
 
 
 def clear_session_approvals():
@@ -78,7 +76,7 @@ KNOWN_SAFE_COMMANDS = {
 # --- Helper Functions ---
 
 
-def _command_to_string(command_list: List[str]) -> str:
+def _command_to_string(command_list: list[str]) -> str:
     """Converts a command list back into a string for matching."""
     # Use shlex.join to handle parameters with spaces or special characters more safely
     # Note: shlex.join is available in Python 3.8+
@@ -89,7 +87,7 @@ def _command_to_string(command_list: List[str]) -> str:
         return " ".join(shlex.quote(arg) for arg in command_list)
 
 
-def _is_command_prefix_safe(command_list: List[str], safe_prefixes: Set[str]) -> bool:
+def _is_command_prefix_safe(command_list: list[str], safe_prefixes: set[str]) -> bool:
     """Checks if the command starts with a known safe prefix."""
     if not command_list:
         return False
@@ -101,7 +99,7 @@ def _is_command_prefix_safe(command_list: List[str], safe_prefixes: Set[str]) ->
     return False
 
 
-def _derive_command_key(tool_name: str, tool_args: Dict) -> str:
+def _derive_command_key(tool_name: str, tool_args: dict) -> str:
     """
     Generates a stable key for a tool call to use in the 'always approve' cache.
     For exec commands, uses 'exec:<base_command>'. For others, uses tool name.
@@ -141,7 +139,7 @@ def _derive_command_key(tool_name: str, tool_args: Dict) -> str:
         return tool_name
 
 
-def add_to_always_approved(tool_name: str, tool_args: Dict):
+def add_to_always_approved(tool_name: str, tool_args: dict):
     """Adds a command key to the session's always-approved set."""
     call_key = _derive_command_key(tool_name, tool_args)
     if call_key:
@@ -152,7 +150,7 @@ def add_to_always_approved(tool_name: str, tool_args: Dict):
 # --- Core Approval Logic ---
 
 
-def is_safe_readonly_command(command_list: List[str], config: "AppConfig") -> Optional[Dict[str, str]]:
+def is_safe_readonly_command(command_list: list[str], config: "AppConfig") -> dict[str, str] | None:
     """
     Checks if a command is likely safe and read-only.
     Returns a dict with 'reason' and 'group' if safe, otherwise None.
@@ -218,9 +216,7 @@ def is_safe_readonly_command(command_list: List[str], config: "AppConfig") -> Op
     return None
 
 
-def can_auto_approve(
-    tool_name: str, tool_args: Dict, policy: ApprovalMode, config: "AppConfig"
-) -> SafetyAssessmentResult:
+def can_auto_approve(tool_name: str, tool_args: dict, policy: ApprovalMode, config: "AppConfig") -> SafetyAssessmentResult:
     """
     Determines if a tool call can be automatically approved based on the policy.
     Now includes session 'always approve' check.
@@ -242,14 +238,12 @@ def can_auto_approve(
         # Get command list from tool_args (assume it's already parsed as a list, or we need to parse it)
         # Note: _derive_command_key already handles parsing, but here we may need to parse again for safety checks
         cmd_input = tool_args.get("command")
-        cmd_list: List[str] = []
+        cmd_list: list[str] = []
         if isinstance(cmd_input, str):
             try:
                 cmd_list = shlex.split(cmd_input)
             except ValueError:
-                return SafetyAssessmentResult(
-                    type="reject", reason="Cannot parse command", group=None, run_in_sandbox=False
-                )
+                return SafetyAssessmentResult(type="reject", reason="Cannot parse command", group=None, run_in_sandbox=False)
         elif isinstance(cmd_input, list) and all(isinstance(item, str) for item in cmd_input):
             cmd_list = cmd_input  # If already a list, use it directly
         else:
@@ -292,9 +286,7 @@ def can_auto_approve(
                 run_in_sandbox=False,  # Dangerous mode: no sandbox
             )
         else:  # Should not happen
-            return SafetyAssessmentResult(
-                type="reject", reason="Unknown approval policy", group=None, run_in_sandbox=False
-            )
+            return SafetyAssessmentResult(type="reject", reason="Unknown approval policy", group=None, run_in_sandbox=False)
 
     elif tool_name in ["write_to_file", "apply_diff", "apply_patch"]:  # File modification tools
         if policy == ApprovalMode.SUGGEST:
@@ -314,9 +306,7 @@ def can_auto_approve(
                 run_in_sandbox=False,  # File modifications usually not run in a sandbox
             )
         else:  # Should not happen
-            return SafetyAssessmentResult(
-                type="reject", reason="Unknown approval policy", group=None, run_in_sandbox=False
-            )
+            return SafetyAssessmentResult(type="reject", reason="Unknown approval policy", group=None, run_in_sandbox=False)
 
     elif tool_name in ["read_file", "list_files"]:  # Read-only file tools
         # These are generally safe and can be auto-approved in all modes (unsandboxed)

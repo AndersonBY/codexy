@@ -23,12 +23,13 @@ dependencies = [
   "httpx>=0.28.1",
   "packaging>=25.0",
   "python-dotenv",
+  "pyperclip>=1.9.0",
 ]
 description = "A Python implementation of the Codex CLI tool."
 name = "codexy"
 readme = "README.md"
 requires-python = ">=3.10"
-version = "0.0.5"
+version = "0.0.8"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/andersonby/codexy/issues"
@@ -44,4 +45,28 @@ distribution = true
 excludes = ["tests"]
 
 [dependency-groups]
-dev = ["textual-dev", "pytest>=8.3.5"]
+dev = ["textual-dev", "pytest>=8.3.5", "pre-commit", "ruff"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle errors
+  "W",  # pycodestyle warnings
+  "F",  # pyflakes
+  "I",  # isort
+  "B",  # flake8-bugbear
+  "C4", # flake8-comprehensions
+  "UP", # pyupgrade
+]
+
+ignore = [
+  "E501", # Line too long (controlled by line-length)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

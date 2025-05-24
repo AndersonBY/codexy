@@ -1,18 +1,16 @@
-# -*- coding: utf-8 -*-
-
 """Utilities for estimating token usage."""
 
 import json
 import math
-from typing import List, Sequence, Union, Optional
-from openai.types.chat import ChatCompletionMessageParam, ChatCompletionContentPartParam, ChatCompletionMessageToolCall
+from collections.abc import Sequence
 
+from openai.types.chat import ChatCompletionContentPartParam, ChatCompletionMessageParam, ChatCompletionMessageToolCall
 
 # Simple approximation: 4 characters per token on average
 CHARS_PER_TOKEN_ESTIMATE = 4
 
 
-def _count_chars_in_content(content: Union[str, Sequence[ChatCompletionContentPartParam], None]) -> int:
+def _count_chars_in_content(content: str | Sequence[ChatCompletionContentPartParam] | None) -> int:
     """Counts characters in message content, handling different formats."""
     if content is None:
         return 0
@@ -43,7 +41,7 @@ def _count_chars_in_content(content: Union[str, Sequence[ChatCompletionContentPa
     return 0
 
 
-def _count_chars_in_tool_calls(tool_calls: Optional[List[ChatCompletionMessageToolCall]]) -> int:
+def _count_chars_in_tool_calls(tool_calls: list[ChatCompletionMessageToolCall] | None) -> int:
     """Counts characters in tool call names and arguments."""
     count = 0
     if tool_calls and isinstance(tool_calls, list):
@@ -64,7 +62,7 @@ def _count_chars_in_tool_calls(tool_calls: Optional[List[ChatCompletionMessageTo
     return count
 
 
-def approximate_tokens_used(history: List[ChatCompletionMessageParam]) -> int:
+def approximate_tokens_used(history: list[ChatCompletionMessageParam]) -> int:
     """
     Roughly estimates the number of tokens used by the message history.
     Excludes system messages from the count, includes tool calls and outputs.

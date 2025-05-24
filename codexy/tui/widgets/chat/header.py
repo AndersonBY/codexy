@@ -1,9 +1,9 @@
-from typing import Optional, cast
+from typing import cast
 
 from textual.app import ComposeResult
-from textual.reactive import reactive
-from textual.widgets import Static, Label
 from textual.containers import Horizontal
+from textual.reactive import reactive
+from textual.widgets import Label, Static
 
 from ....config import AppConfig
 from ....utils.filesystem import short_cwd
@@ -62,7 +62,7 @@ class ChatHeader(Static):
     approval_mode: reactive[str] = reactive("N/A")
 
     # Store config for reference if needed, but maybe not necessary
-    _app_config: Optional[AppConfig] = None
+    _app_config: AppConfig | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -76,7 +76,7 @@ class ChatHeader(Static):
             yield Label("Session:", classes="info", shrink=True)  # Allow info label to shrink
             yield Label(self.session_id, classes="value", id="session-label")
 
-    def update_info(self, config: AppConfig, session_id: Optional[str] = None):
+    def update_info(self, config: AppConfig, session_id: str | None = None):
         """Update Header display info (called once on mount usually)."""
         self._app_config = config
         self.session_id = session_id or "N/A"

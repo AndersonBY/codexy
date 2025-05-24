@@ -3,7 +3,6 @@ from pathlib import Path
 
 from openai.types.chat import ChatCompletionToolParam
 
-
 PROJECT_ROOT = Path.cwd()
 
 
@@ -16,9 +15,9 @@ def parse_diff_blocks(diff_text: str) -> list[tuple[int, str, str]]:
     pattern = re.compile(
         r"^\s*<<<<<<<\s*SEARCH\s*\n"  # Start marker
         r":start_line:(\d+)\s*\n"  # Capture start line number
-        r"-------\s*\n"  # Separator
+        r"-{2,}\s*\n"  # Separator (at least two hyphens)
         r"(.*?)"  # Capture search content (non-greedy)
-        r"=======\s*\n"  # Separator
+        r"={2,}\s*\n"  # Separator (at least two equals signs)
         r"(.*?)"  # Capture replace content (non-greedy)
         r">>>>>>>\s*REPLACE\s*$",  # End marker
         re.MULTILINE | re.DOTALL,  # Multiline and Dotall flags
@@ -75,7 +74,7 @@ def apply_diff_tool(path: str, diff: str) -> str:
 
     # --- Read File Content ---
     try:
-        with open(resolved_path, "r", encoding="utf-8") as f:
+        with open(resolved_path, encoding="utf-8") as f:
             original_lines = f.readlines()  # Read lines into a list
     except Exception as e:
         return f"Error reading file '{path}' for diff application: {e}"
@@ -99,7 +98,9 @@ def apply_diff_tool(path: str, diff: str) -> str:
                 else:
                     print(f"Single line mismatch - expected: '{search_content}', actual: '{current_line}'")
 
-            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
+            errors.append(
+                f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content."
+            )
             continue
 
         # Multi-line processing
@@ -132,7 +133,9 @@ def apply_diff_tool(path: str, diff: str) -> str:
             applied_count += 1
             print(f"Successfully applied multi-line diff block starting at line {start_line} to {path}")
         else:
-            errors.append(f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content.")
+            errors.append(
+                f"Error applying block starting at line {start_line}: SEARCH content does not exactly match file content."
+            )
 
     # --- Write Modified Content Back ---
     if applied_count > 0 and not errors:  # Only write if at least one block applied and no errors occurred
@@ -163,7 +166,59 @@ APPLY_DIFF_TOOL_DEF: ChatCompletionToolParam = {
                 },
                 "diff": {
                     "type": "string",
-                    "description": "The diff block defining the changes, including start line numbers for each SEARCH block (e.g., '<<<<<<< SEARCH\\n:start_line:10\\n-------\\n[content_to_find]\\n=======\\n[replacement_content]\\n>>>>>>> REPLACE'). Use newline characters (\\n) for line breaks within the diff string.",
+                    "description": """A string defining the changes in SEARCH/REPLACE block format.
+
+**EXACT FORMAT REQUIRED:**
+```
+<<<<<<< SEARCH
+:start_line:LINE_NUMBER
+-------
+EXACT_CONTENT_TO_FIND
+=======
+NEW_CONTENT_TO_REPLACE_WITH
+>>>>>>> REPLACE
+```
+
+**CRITICAL RULES:**
+1. Must start with `<<<<<<< SEARCH` (exactly 7 < symbols + space + SEARCH)
+2. Next line: `:start_line:NUMBER` where NUMBER is the 1-based line number where SEARCH content starts
+3. Separator: At least 2 hyphens `--` or more `-------` on their own line
+4. EXACT_CONTENT_TO_FIND: Must match the file content character-for-character (including whitespace)
+5. Separator: At least 2 equals `==` or more `=======` on their own line
+6. NEW_CONTENT_TO_REPLACE_WITH: The replacement content
+7. Must end with `>>>>>>> REPLACE` (exactly 7 > symbols + space + REPLACE)
+
+**EXAMPLE - Single line change:**
+```
+<<<<<<< SEARCH
+:start_line:5
+-------
+import os
+=======
+import os
+from pathlib import Path
+>>>>>>> REPLACE
+```
+
+**EXAMPLE - Multi-line change:**
+```
+<<<<<<< SEARCH
+:start_line:10
+-------
+def old_function():
+    return "old"
+=======
+def new_function():
+    return "new"
+    # Added comment
+>>>>>>> REPLACE
+```
+
+**IMPORTANT NOTES:**
+- The SEARCH content must match the file EXACTLY (same indentation, spaces, etc.)
+- Line numbers are 1-based (first line = 1, not 0)
+- Multiple blocks can be concatenated in one diff string
+- Each block is processed independently""",
                 },
             },
             "required": ["path", "diff"],
