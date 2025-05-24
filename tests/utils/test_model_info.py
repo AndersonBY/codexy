@@ -1,14 +1,11 @@
-# -*- coding: utf-8 -*-
-
-import unittest
 import sys
+import unittest
 from io import StringIO
-from unittest.mock import patch
 
-from codexy.utils.model_info import get_model_max_tokens, DEFAULT_MAX_TOKENS, MODEL_MAX_TOKENS
+from codexy.utils.model_info import DEFAULT_MAX_TOKENS, MODEL_MAX_TOKENS, get_model_max_tokens
+
 
 class TestGetModelMaxTokens(unittest.TestCase):
-
     def test_known_model_names(self):
         self.assertEqual(get_model_max_tokens("gpt-4"), MODEL_MAX_TOKENS["gpt-4"])
         self.assertEqual(get_model_max_tokens("gpt-3.5-turbo-16k"), MODEL_MAX_TOKENS["gpt-3.5-turbo-16k"])
@@ -42,5 +39,6 @@ class TestGetModelMaxTokens(unittest.TestCase):
         # Ensure "gpt-3.5-turbo-16k" is checked before "gpt-3.5-turbo"
         self.assertEqual(get_model_max_tokens("gpt-3.5-turbo-16k-variant"), MODEL_MAX_TOKENS["gpt-3.5-turbo-16k"])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

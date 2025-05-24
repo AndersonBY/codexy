@@ -107,7 +107,7 @@ class Agent:
         memory_config = self.config.get("memory")
         keep_recent_messages = DEFAULT_MEMORY_KEEP_RECENT_MESSAGES
         if memory_config and memory_config.get("keep_recent_messages") is not None:
-            keep_recent_messages = memory_config["keep_recent_messages"]
+            keep_recent_messages = memory_config.get("keep_recent_messages", 5)
 
         if not self.history:
             print("[Agent] History is empty, no compression needed.", file=sys.stderr)
@@ -116,7 +116,11 @@ class Agent:
         new_history: list[ChatCompletionMessageParam] = []
         compressible_history: list[ChatCompletionMessageParam] = list(self.history)  # Make a mutable copy
 
-        # Preserve System Prompt        if compressible_history and compressible_history[0].get("role") == "system":            system_message = compressible_history.pop(0)            new_history.append(system_message)            print("[Agent] Preserved system message during compression.", file=sys.stderr)
+        # Preserve System Prompt
+        if compressible_history and compressible_history[0].get("role") == "system":
+            system_message = compressible_history.pop(0)
+            new_history.append(system_message)
+            print("[Agent] Preserved system message during compression.", file=sys.stderr)
 
         # Handle Empty or Short History (considering if system message was popped)
         # If only system message was present, len(compressible_history) is 0.
@@ -135,7 +139,11 @@ class Agent:
         num_to_summarize = len(compressible_history) - keep_recent_messages
 
         # Messages to keep are the last 'keep_recent_messages'
-        messages_to_keep = compressible_history[-keep_recent_messages:]
+        # Handle edge case when keep_recent_messages is 0
+        if keep_recent_messages == 0:
+            messages_to_keep = []
+        else:
+            messages_to_keep = compressible_history[-keep_recent_messages:]
 
         if num_to_summarize > 0:
             summary_message: ChatCompletionMessageParam = {
@@ -265,7 +273,9 @@ class Agent:
                         call_args["full_stdout"] = self.config.get("full_stdout", DEFAULT_FULL_STDOUT)
 
                     if is_sandboxed:
-                        print(f"  [Agent] Passing sandbox context: is_sandboxed={is_sandboxed}, allowed_paths={allowed_write_paths}")
+                        print(
+                            f"  [Agent] Passing sandbox context: is_sandboxed={is_sandboxed}, allowed_paths={allowed_write_paths}"
+                        )
                 # --- End sandbox/write path passing ---
 
                 print(f"  [Agent] Calling {function_name} with args: {call_args}")
@@ -278,7 +288,9 @@ class Agent:
             print(f"Traceback:\n{formatted_traceback}", file=sys.stderr)
             return f"Error during execution of tool '{function_name}': {e}\n\nTraceback:\n{formatted_traceback}"
 
-    async def process_turn_stream(self, prompt: str | None = None, image_paths: list[str] | None = None) -> AsyncIterator[StreamEvent]:
+    async def process_turn_stream(
+        self, prompt: str | None = None, image_paths: list[str] | None = None
+    ) -> AsyncIterator[StreamEvent]:
         """
         Processes one turn of interaction with streaming.
         Yields StreamEvent objects for text deltas, tool calls, and errors.
@@ -327,7 +339,9 @@ class Agent:
 
         if memory_config:
             enable_compression = memory_config.get("enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION)
-            compression_threshold_factor = memory_config.get("compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR)
+            compression_threshold_factor = memory_config.get(
+                "compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR
+            )
 
         if enable_compression:
             model_name = self.config["model"]
@@ -443,13 +457,17 @@ class Agent:
 
                                 # Ensure list is long enough
                                 while len(tool_calls_list) <= index:
-                                    tool_calls_list.append({"id": None, "type": "function", "function": {"name": None, "arguments": ""}})
+                                    tool_calls_list.append(
+                                        {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
+                                    )
                                 current_call_entry = tool_calls_list[index]
 
                                 # --- Handle missing ID ---
                                 if tool_call_chunk.id:
                                     current_call_entry["id"] = tool_call_chunk.id
-                                elif current_call_entry["id"] is None and tool_call_chunk.function:  # Generate only if not already assigned
+                                elif (
+                                    current_call_entry["id"] is None and tool_call_chunk.function
+                                ):  # Generate only if not already assigned
                                     # Generate a temporary ID if missing
                                     temp_id = f"tool_call_id_{index}-{uuid.uuid4()}"
                                     current_call_entry["id"] = temp_id
@@ -575,7 +593,9 @@ class Agent:
                 print(f"[Agent] Attempt {attempt + 1} failed: {error_msg}", file=sys.stderr)
                 status_code = getattr(e, "status_code", None)
                 should_retry = (
-                    isinstance(e, APITimeoutError | APIConnectionError) or isinstance(e, RateLimitError) or (isinstance(e, APIStatusError) and status_code and status_code >= 500)
+                    isinstance(e, APITimeoutError | APIConnectionError)
+                    or isinstance(e, RateLimitError)
+                    or (isinstance(e, APIStatusError) and status_code and isinstance(status_code, int) and status_code >= 500)
                 ) and attempt < MAX_RETRIES - 1
                 if isinstance(e, BadRequestError) and status_code == 400:
                     error_body = getattr(e, "body", {})
@@ -583,13 +603,9 @@ class Agent:
                     if "context_length_exceeded" in error_detail or "maximum context length" in error_detail:
                         error_content: str
                         if self.compression_attempted_this_turn:
-                            error_content = (
-                                "Error: Context length exceeded model's limit even after attempting history compression. Please clear history (/clear) or start a new session."
-                            )
+                            error_content = "Error: Context length exceeded model's limit even after attempting history compression. Please clear history (/clear) or start a new session."
                         else:
-                            error_content = (
-                                "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
-                            )
+                            error_content = "Error: The conversation history and prompt exceed the model's maximum context length. Please clear the history (/clear) or start a new session."
                         yield create_stream_event(
                             type="error",
                             content=error_content,
@@ -607,7 +623,11 @@ class Agent:
                     if isinstance(e, APIStatusError):
                         try:
                             error_body = e.response.json()
-                            message = error_body.get("error", {}).get("message", e.response.text) if isinstance(error_body, dict) else e.response.text
+                            message = (
+                                error_body.get("error", {}).get("message", e.response.text)
+                                if isinstance(error_body, dict)
+                                else e.response.text
+                            )
                             friendly_error = f"API Error (Status {e.status_code}): {message}"
                         except Exception:
                             pass
@@ -634,10 +654,14 @@ class Agent:
                     return
 
         # If loop finishes without returning (all retries failed)
-        yield create_stream_event(type="error", content=f"Error: Agent failed after {MAX_RETRIES} retries. Last error: {last_error}")
+        yield create_stream_event(
+            type="error", content=f"Error: Agent failed after {MAX_RETRIES} retries. Last error: {last_error}"
+        )
         self._current_stream = None
 
-    async def continue_with_tool_results_stream(self, tool_results: list[ChatCompletionToolMessageParam]) -> AsyncIterator[StreamEvent]:
+    async def continue_with_tool_results_stream(
+        self, tool_results: list[ChatCompletionToolMessageParam]
+    ) -> AsyncIterator[StreamEvent]:
         """
         Adds tool results to history and yields subsequent stream events from the API.
         """

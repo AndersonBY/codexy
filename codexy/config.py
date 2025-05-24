@@ -59,7 +59,7 @@ class HistoryConfig(TypedDict, total=False):
 
 
 class MemoryConfig(TypedDict, total=False):
-    """Configuration for agent memory (if implemented)."""
+    """Configuration for agent memory."""
 
     enabled: bool
     enable_compression: bool  # Default: False
@@ -348,7 +348,7 @@ def load_config(
 
     # Process memory configuration
     loaded_memory_config = stored_config.get("memory") or {}
-    runtime_memory: Optional[MemoryConfig] = None
+    runtime_memory: MemoryConfig | None = None
     if loaded_memory_config.get("enabled", DEFAULT_MEMORY_ENABLED):  # Check if memory is enabled
         runtime_memory = {
             "enabled": True,
