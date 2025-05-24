@@ -19,7 +19,7 @@ class TestGetModelMaxTokens(unittest.TestCase):
         self.assertEqual(get_model_max_tokens("gpt-4-0125-preview"), MODEL_MAX_TOKENS["gpt-4-turbo"])
         self.assertEqual(get_model_max_tokens("gpt-4-1106-preview"), MODEL_MAX_TOKENS["gpt-4-turbo"])
         self.assertEqual(get_model_max_tokens("custom-gpt-4-model"), MODEL_MAX_TOKENS["gpt-4"])
-        self.assertEqual(get_model_max_tokens("gpt-3.5-turbo-instruct"), MODEL_MAX_TOKENS["gpt-3.5-turbo"])
+        self.assertEqual(get_model_max_tokens("gpt-3.5-turbo-instruct"), 4096)
         self.assertEqual(get_model_max_tokens("my-o4-mini-variant"), MODEL_MAX_TOKENS["o4-mini"])
 
     def test_unknown_model_name(self):

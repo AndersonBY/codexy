@@ -308,44 +308,6 @@ def load_config(
             )
         full_auto_error_mode = DEFAULT_FULL_AUTO_ERROR_MODE
 
-    # --- Merging Config ---
-    stored_model = stored_config.get("model")
-    model = (
-        stored_model.strip()
-        if stored_model and stored_model.strip()
-        else (DEFAULT_FULL_CONTEXT_MODEL if is_full_context else DEFAULT_AGENTIC_MODEL)
-    )
-
-    loaded_history_config = stored_config.get("history") or {}
-    runtime_history: HistoryConfig = {
-        "max_size": loaded_history_config.get("max_size", DEFAULT_HISTORY_MAX_SIZE),
-        "save_history": loaded_history_config.get("save_history", DEFAULT_HISTORY_SAVE),
-    }
-
-    # Validate and set user's preferred approval mode, defaulting to SUGGEST
-    approval_mode_str = stored_config.get("approval_mode", DEFAULT_APPROVAL_MODE) or DEFAULT_APPROVAL_MODE
-    try:
-        _ = ApprovalMode(approval_mode_str)
-        user_preferred_approval_mode = approval_mode_str
-    except ValueError:
-        print(f"Warning: Invalid approval_mode '{approval_mode_str}' in config. Using default '{DEFAULT_APPROVAL_MODE}'.")
-        user_preferred_approval_mode = DEFAULT_APPROVAL_MODE
-
-    # Load safe commands, defaulting to empty list
-    safe_commands = stored_config.get("safe_commands", [])
-    if not isinstance(safe_commands, list) or not all(isinstance(s, str) for s in safe_commands):
-        print("Warning: Invalid 'safe_commands' format in config. Expected list of strings. Ignoring.")
-        safe_commands = list(DEFAULT_SAFE_COMMANDS)  # Use default
-
-    # Load full_auto_error_mode, validate and provide default
-    full_auto_error_mode = stored_config.get("full_auto_error_mode")
-    if full_auto_error_mode not in ["ask-user", "ignore-and-continue"]:
-        if full_auto_error_mode is not None:  # Warn only if an invalid value was provided
-            print(
-                f"Warning: Invalid full_auto_error_mode '{full_auto_error_mode}' in config. Using default '{DEFAULT_FULL_AUTO_ERROR_MODE}'."
-            )
-        full_auto_error_mode = DEFAULT_FULL_AUTO_ERROR_MODE
-
     # Process memory configuration
     loaded_memory_config = stored_config.get("memory") or {}
     runtime_memory: MemoryConfig | None = None
@@ -361,13 +323,10 @@ def load_config(
     elif "enabled" in loaded_memory_config:  # if "enabled" is explicitly false
         runtime_memory = {  # Ensure this dict is created even if memory is explicitly disabled
             "enabled": False,
-            "enable_compression": loaded_memory_config.get(
-                "enable_compression", DEFAULT_MEMORY_ENABLE_COMPRESSION
-            ),  # Still load or default other keys
-            "compression_threshold_factor": loaded_memory_config.get(
-                "compression_threshold_factor", DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR
-            ),
-            "keep_recent_messages": loaded_memory_config.get("keep_recent_messages", DEFAULT_MEMORY_KEEP_RECENT_MESSAGES),
+            # When memory is disabled, use defaults instead of user-provided values
+            "enable_compression": DEFAULT_MEMORY_ENABLE_COMPRESSION,
+            "compression_threshold_factor": DEFAULT_MEMORY_COMPRESSION_THRESHOLD_FACTOR,
+            "keep_recent_messages": DEFAULT_MEMORY_KEEP_RECENT_MESSAGES,
         }
     # If memory key doesn't exist in stored_config or "enabled" is not in loaded_memory_config,
     # and not explicitly set to false, runtime_memory remains None (memory disabled by default implicitly)

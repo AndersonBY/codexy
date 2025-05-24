@@ -536,13 +536,14 @@ def _finalize_operation(current_op: ParsedOperation, line_buffer: list[str]) -> 
 # --- Enhanced Diff Application with Context Matching ---
 
 
-def _apply_enhanced_update(original_content: str, update_op: UpdateOp) -> str:
+def _apply_enhanced_update(original_content: str, update_op: UpdateOp) -> tuple[str, list[str]]:
     """
     Apply an update operation using enhanced context-based matching.
     Now properly handles both traditional and enhanced formats.
     """
     file_lines = original_content.splitlines()
     result_lines = file_lines.copy()
+    info_messages = []  # Collect all informational messages
 
     # Track how much fuzz we accumulated for reporting
     total_fuzz = 0
@@ -564,48 +565,81 @@ def _apply_enhanced_update(original_content: str, update_op: UpdateOp) -> str:
         if not chunk.del_lines and not chunk.ins_lines:
             continue
 
-        # Strategy 1: Direct text search for deletion content
+        # Strategy 1: Enhanced direct text search for deletion content with multiple strategies
         if chunk.del_lines:
             target_text = chunk.del_lines[0].strip()  # Use first deletion line as search target
+            found_match = False
 
-            for i, line in enumerate(result_lines):
-                if normalize_text_for_matching(line.strip()) == normalize_text_for_matching(target_text):
-                    # Found potential match, verify the entire deletion block
-                    match_valid = True
+            # Try multiple matching strategies with increasing fuzziness
+            for strategy_name, normalizer in [
+                ("exact", lambda x: normalize_text_for_matching(x.strip())),
+                ("quote_normalize", lambda x: normalize_text_for_matching(x.strip().replace('"', "'"))),
+                ("whitespace_ignore", lambda x: normalize_text_for_matching(x.replace(" ", ""))),
+                ("fuzzy", lambda x: normalize_text_for_matching(x.strip().lower())),
+            ]:
+                if found_match:
+                    break
 
-                    # Check if we have enough lines for the full deletion
-                    if i + len(chunk.del_lines) > len(result_lines):
-                        continue
+                for i, line in enumerate(result_lines):
+                    if normalizer(line) == normalizer(target_text):
+                        # Found potential match, verify the entire deletion block
+                        match_valid = True
 
-                    # Verify all deletion lines match
-                    for j, del_line in enumerate(chunk.del_lines):
-                        if i + j >= len(result_lines):
-                            match_valid = False
-                            break
+                        # Check if we have enough lines for the full deletion
+                        if i + len(chunk.del_lines) > len(result_lines):
+                            continue
 
-                        actual_line = result_lines[i + j].strip()
-                        expected_line = del_line.strip()
-
-                        if normalize_text_for_matching(actual_line) != normalize_text_for_matching(expected_line):
-                            # Try more fuzzy matching
-                            if normalize_text_for_matching(actual_line.replace(" ", "")) == normalize_text_for_matching(
-                                expected_line.replace(" ", "")
-                            ):
-                                total_fuzz += 50  # Whitespace difference
-                            else:
+                        # Verify all deletion lines match using the same strategy
+                        for j, del_line in enumerate(chunk.del_lines):
+                            if i + j >= len(result_lines):
                                 match_valid = False
                                 break
 
-                    if match_valid:
-                        # Record this chunk for application
-                        chunks_to_apply.append((i, chunk))
-                        break
+                            actual_line = result_lines[i + j]
+                            expected_line = del_line
 
-        # Strategy 2: If no deletions, try to find insertion point by context
+                            if normalizer(actual_line) != normalizer(expected_line):
+                                match_valid = False
+                                break
+
+                        if match_valid:
+                            # Record this chunk for application
+                            chunks_to_apply.append((i, chunk))
+                            found_match = True
+                            if strategy_name != "exact":
+                                total_fuzz += 100 if strategy_name == "fuzzy" else 50
+                                info_messages.append(f"Info: Applied chunk using {strategy_name} matching strategy")
+                            break
+
+            if not found_match:
+                info_messages.append(f"Warning: Could not find match for deletion chunk: {chunk.del_lines[0][:50]}...")
+
+        # Strategy 2: Handle pure insertion chunks (e.g., adding imports)
         elif chunk.ins_lines:
-            # For insertion-only chunks, we need to be more careful about placement
-            # Try to find a good insertion point (this is more complex and may need refinement)
-            print(f"Warning: Insertion-only chunk not implemented for enhanced format: {chunk.ins_lines}")
+            # For pure insertion, try to find the best location
+            insertion_position = None
+
+            # Common case: adding imports at the top
+            if any("import" in line for line in chunk.ins_lines):
+                # Try to insert after existing imports
+                best_position = 0
+                for i, line in enumerate(result_lines):
+                    stripped_line = line.strip()
+                    if stripped_line.startswith("import ") or stripped_line.startswith("from "):
+                        best_position = i + 1
+                    elif stripped_line and not stripped_line.startswith("#"):
+                        # Found first non-import, non-comment line
+                        break
+                insertion_position = best_position
+                info_messages.append(f"Info: Inserting import statement(s) at position {insertion_position}")
+            else:
+                # For other pure insertions, try to find context-based insertion point
+                info_messages.append(f"Warning: Need to determine insertion point for non-import chunk: {chunk.ins_lines}")
+                # For now, we'll skip non-import pure insertions as they need more context
+                continue
+
+            if insertion_position is not None:
+                chunks_to_apply.append((insertion_position, chunk))
 
     # Sort chunks by position in reverse order to avoid index shifting
     chunks_to_apply.sort(key=lambda x: x[0], reverse=True)
@@ -642,22 +676,27 @@ def _apply_enhanced_update(original_content: str, update_op: UpdateOp) -> str:
     applied_count = len(chunks_to_apply)
     total_count = len([c for c in update_op.chunks if c.del_lines or c.ins_lines])
 
+    # Critical fix: If no chunks were applied, raise an error instead of silently succeeding
+    if applied_count == 0 and total_count > 0:
+        raise ToolError(f"No changes were applied to the file - all {total_count} chunks failed to match or apply")
+
     if applied_count != total_count:
         missing_chunks = total_count - applied_count
-        print(f"Warning: Could not apply {missing_chunks} out of {total_count} chunks")
+        info_messages.append(f"Warning: Could not apply {missing_chunks} out of {total_count} chunks")
 
     if total_fuzz > 0:
-        print(f"Applied update with fuzz factor: {total_fuzz}")
+        info_messages.append(f"Applied update with fuzz factor: {total_fuzz}")
 
-    return "\n".join(result_lines)
+    return "\n".join(result_lines), info_messages
 
 
-def _apply_traditional_update(original_content: str, update_op: UpdateOp) -> str:
+def _apply_traditional_update(original_content: str, update_op: UpdateOp) -> tuple[str, list[str]]:
     """
     Apply traditional format update using the original context-based logic.
     """
     file_lines = original_content.splitlines()
     result_lines = file_lines.copy()
+    info_messages = []  # Collect all informational messages
 
     # Track how much fuzz we accumulated for reporting
     total_fuzz = 0
@@ -721,9 +760,9 @@ def _apply_traditional_update(original_content: str, update_op: UpdateOp) -> str
             result_lines.insert(adjusted_chunk_start + i, ins_line)
 
     if total_fuzz > 0:
-        print(f"Applied update with fuzz factor: {total_fuzz}")
+        info_messages.append(f"Applied update with fuzz factor: {total_fuzz}")
 
-    return "\n".join(result_lines)
+    return "\n".join(result_lines), info_messages
 
 
 # --- Filesystem Interaction and Safety ---
@@ -838,7 +877,7 @@ def apply_patch(patch_text: str) -> str:
                 original_content = target_path.read_text(encoding="utf-8")
 
                 # Use enhanced update application
-                new_content = _apply_enhanced_update(original_content, op)
+                new_content, update_messages = _apply_enhanced_update(original_content, op)
 
                 if op.move_to:
                     new_target_path = _resolve_and_check_path(op.move_to)
@@ -850,7 +889,11 @@ def apply_patch(patch_text: str) -> str:
                     results.append(f"Updated and moved '{op.path}' to '{op.move_to}'")
                 else:
                     target_path.write_text(new_content, encoding="utf-8")
-                    results.append(f"Updated file: {op.path}")
+                    if update_messages:
+                        detailed_info = "\n".join([f"  - {msg}" for msg in update_messages])
+                        results.append(f"Updated file: {op.path}\n{detailed_info}")
+                    else:
+                        results.append(f"Updated file: {op.path}")
 
         except FileNotFoundError:
             errors.append(f"Error processing '{op.path}': File not found.")

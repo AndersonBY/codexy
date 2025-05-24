@@ -82,7 +82,7 @@ MODEL_MAX_TOKENS = {
     "gpt-4.1-32k": 32768,
     "gpt-4": 8192,
     "gpt-4.1": 1000000,
-    "gpt-3.5-turbo-16k": 16384,
+    "gpt-3.5-turbo-16k": 16385,
     "gpt-3.5-turbo": 16385,
     "o4-mini": 200000,
     "gpt-4o": 128000,
@@ -101,17 +101,19 @@ def get_max_tokens_for_model(model_name: str) -> int:
     if model_name in MODEL_MAX_TOKENS:
         return MODEL_MAX_TOKENS[model_name]
 
-    # Check for well-known prefixes
+    # Check for well-known prefixes (order matters - more specific first)
     if "gpt-4-turbo" in model_name:
         return 128000
     if "gpt-4-32k" in model_name:
         return 32768
-    if "gpt-4" in model_name:
-        return 8192
     if "gpt-3.5-turbo-16k" in model_name:
         return 16385
+    if "gpt-3.5-turbo-instruct" in model_name:
+        return 4096  # gpt-3.5-turbo-instruct has different token limit than regular gpt-3.5-turbo
     if "gpt-3.5-turbo" in model_name:
         return 16385
+    if "gpt-4" in model_name:
+        return 8192
     if "o4-mini" in model_name:
         return 200000
     if "gpt-4o" in model_name:
