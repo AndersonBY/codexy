@@ -236,6 +236,56 @@ safe_commands: # 在 'suggest' 模式下可安全自动批准的命令
 - 优先使用 f-string 进行格式化。
 ```
 
+### 记忆压缩
+
+为了帮助管理对话历史并防止超过模型的上下文长度限制，Codexy 包含了记忆压缩功能。启用后，它会自动压缩对话历史中较旧的部分。
+
+**工作原理:**
+
+*   初始系统提示（来自 `instructions.md` 或项目文档）始终保留（如果存在）。
+*   对话中可配置数量的最新消息保持未压缩状态。
+*   初始系统提示和最新消息之间的消息将被替换为单个系统通知，表明历史的一部分已被汇总（例如：`[System: X previous message(s) were summarized due to context length constraints.]`）。
+
+**配置:**
+
+这些设置在您的 `~/.codexy/config.json` 或 `~/.codexy/config.yaml` 文件的 `memory` 对象中配置。
+
+*   `enable_compression` (布尔值):
+    *   设置为 `true` 以启用记忆压缩功能。
+    *   默认值: `false`。
+*   `compression_threshold_factor` (浮点数):
+    *   介于 0.0 和 1.0 之间的值。当当前对话历史的估计令牌数超过此因子乘以模型的最大上下文窗口大小时，将触发压缩。
+    *   例如，如果模型的最大令牌数为 4096，此因子为 `0.8`，则当历史超过大约 3277 个令牌时将尝试压缩。
+    *   默认值: `0.8`。
+*   `keep_recent_messages` (整数):
+    *   在对话末尾始终保持未压缩的最新消息数量。
+    *   默认值: `5`。
+
+**`config.json` 示例:**
+
+```json
+{
+  "model": "o4-mini",
+  "memory": {
+    "enable_compression": true,
+    "compression_threshold_factor": 0.75,
+    "keep_recent_messages": 10
+  }
+  // ... 其他设置
+}
+```
+
+**`config.yaml` 示例:**
+
+```yaml
+model: o4-mini
+memory:
+  enable_compression: true
+  compression_threshold_factor: 0.75
+  keep_recent_messages: 10
+# ... 其他设置
+```
+
 ---
 
 ## 项目文档 (Project Docs)
