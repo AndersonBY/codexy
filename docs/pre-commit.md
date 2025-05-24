@@ -1,42 +1,42 @@
-# Pre-commit 配置说明
+# Pre-commit Configuration Guide
 
-## 概述
+## Overview
 
-本项目已配置 pre-commit hooks，在每次 git commit 前自动执行代码检查和格式化。
+This project has pre-commit hooks configured to automatically run code checks and formatting before each git commit.
 
-## 包含的 hooks
+## Included hooks
 
-1. **ruff lint** - 代码质量检查并自动修复
-2. **ruff format** - 代码格式化
-3. **trailing-whitespace** - 移除行尾空白
-4. **end-of-file-fixer** - 确保文件以换行符结尾
-5. **check-yaml** - YAML 文件语法检查
-6. **check-added-large-files** - 防止提交大文件
+1. **ruff lint** - Code quality check with automatic fixes
+2. **ruff format** - Code formatting
+3. **trailing-whitespace** - Remove trailing whitespace
+4. **end-of-file-fixer** - Ensure files end with a newline
+5. **check-yaml** - YAML file syntax check
+6. **check-added-large-files** - Prevent committing large files
 
-## 使用方法
+## Usage
 
-### 安装依赖
+### Install dependencies
 ```bash
 pdm install
 ```
 
-### 安装 pre-commit hooks
+### Install pre-commit hooks
 ```bash
 pdm run pre-commit install
 ```
 
-### 手动运行所有检查
+### Run all checks manually
 ```bash
 pdm run pre-commit run --all-files
 ```
 
-### 手动运行特定 hook
+### Run specific hook manually
 ```bash
 pdm run pre-commit run ruff-format
 ```
 
-## 注意事项
+## Notes
 
-- 如果 pre-commit 检查失败，提交会被阻止
-- 如果代码被自动修复，需要重新 `git add` 并提交
-- 可以使用 `git commit --no-verify` 跳过 pre-commit 检查（不推荐）
+- If pre-commit checks fail, the commit will be blocked
+- If code is automatically fixed, you need to `git add` again and commit
+- You can use `git commit --no-verify` to skip pre-commit checks (not recommended)
