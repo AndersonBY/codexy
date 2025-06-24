@@ -40,7 +40,8 @@ def execute_command_tool(
     if is_sandboxed:
         print(f"Attempting sandboxed execution for: '{command}'")
         if not allowed_write_paths:
-            return "Error: Sandboxed execution requested but no allowed writable paths provided."
+            print(f"[Sandbox] No allowed_write_paths provided, using project root: {PROJECT_ROOT}")
+            allowed_write_paths = [PROJECT_ROOT]
 
         # Ensure allowed paths are resolved absolute paths
         resolved_allowed_paths = []
